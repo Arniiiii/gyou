@@ -8,7 +8,7 @@ import os
 
 class corralRecipe(ConanFile):
     name = "corral"
-    version = "0.20260206"
+    version = "0.20260227"
 
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
@@ -40,7 +40,7 @@ class corralRecipe(ConanFile):
     def source(self):
         git = Git(self)
         git.clone(url="https://github.com/hudson-trading/corral", target=".")
-        git.checkout("282a82cf77f6fa2df9828ce1789e39773a749827")
+        git.checkout("fcec393513e52fb47c1465fdf5e7ff019a640e93")
 
     def package(self):
         cmake = CMake(self)
