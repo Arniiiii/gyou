@@ -35,15 +35,6 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
-# https://youtu.be/Nm9-xKsZoNI?t=912
-target_compile_options(${PROJECT_NAME}
-                       PUBLIC "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->")
-
-
-if(${${PROJECT_NAME}_ENABLE_WARNINGS})
-    include(${CMAKE_CURRENT_LIST_DIR}/cmake/warnings.cmake)
-    set_project_warnings(${PROJECT_NAME})
-endif()
 
 # target_compile_options(${PROJECT_NAME} PUBLIC -fsanitize=address,leak)
 # target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=address,leak)
@@ -84,21 +75,22 @@ endif()
 # just add -lbacktrace
 target_link_libraries(${PROJECT_NAME} PRIVATE backtrace)
 
+# ===== project libs =====
+
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/libs/quill_usage)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE quill_usage::quill_usage)
+
+
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/comp_opts.cmake)
+set_common_compile_options(${PROJECT_NAME})
+
 # enable_testing()
 # # add_test(NAME ${PROJECT_NAME} COMMAND ${PROJECT_NAME})
 # include(GoogleTest)
 # gtest_discover_tests(${PROJECT_NAME})
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(${PROJECT_NAME}
-        PUBLIC -fconcepts-diagnostics-depth=100)
-endif()
 
-if(ENABLE_TEST_COVERAGE)
-    target_compile_options(${PROJECT_NAME} PUBLIC -O0 -g -fprofile-arcs
-                                                -ftest-coverage)
-    target_link_options(${PROJECT_NAME} PUBLIC -fprofile-arcs -ftest-coverage)
-endif()
 
 # ---- Create an installable target ----
 
