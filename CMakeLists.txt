@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22...3.29)
 
 project(
-    YoutubeToOllama
+    gyou
   VERSION 0.0.0.2
   LANGUAGES CXX)
 

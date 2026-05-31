@@ -108,6 +108,7 @@ struct Config
     std::filesystem::path log_file;
     quill::LogLevel log_level;
     size_t concurrency_per_service{};
+    std::filesystem::path path_to_repo;
 };
 
 struct EntryData
@@ -134,6 +135,13 @@ enum class ReturnCodes : int
     FailParsePromptResult = 6,
     FailInitializationLogger = 7,
 
+};
+
+enum class PackageType
+{
+    Unknown,
+    Release,
+    Commit,
 };
 
 namespace
@@ -168,71 +176,78 @@ namespace
                                          boost::property_tree::ptree tree,
                                          Config const& cfg, auto& semaphores)
     {
+        RE2 re_category(R"(([\w][\w+.-]*))", RE2::Quiet);
+        RE2 re_pkg_9999(R"([\w+.-]*9999)", RE2::Quiet);
+        RE2 re_pkg_with_date(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet);
+
         CORRAL_WITH_NURSERY(nursery)
         {
-            // for (auto& xml_entry : tree.get_child("feed"))
-            //     {
-            //         if ("entry" != xml_entry.first)
-            //             {
-            //                 continue;
-            //             }
-            //         auto const& link
-            //             = xml_entry.second.get_child("link.<xmlattr>.href");
-            //         std::string link_str = link.data();
-            //         LOG_INFO(
-            //             "Got link to a YouTube video, maybe... Here's "
-            //             "the link: {}",
-            //             link_str);
-            //         if (not cfg.proceed_with_shorts
-            //             and link_str.contains("shorts"))
-            //             {
-            //                 LOG_INFO("This is a link to a short. Skipping.");
-            //                 continue;
-            //             }
-            //
-            //         auto const& author
-            //             = xml_entry.second.get_child("author.name");
-            //         auto const& title
-            //             =
-            //             xml_entry.second.get_child("media:group.media:title");
-            //         auto& description = xml_entry.second.get_child(
-            //             "media:group.media:description");
-            //
-            //         nursery.start(
-            //             [&, link_str = link_str, author = std::cref(author),
-            //              title = std::cref(title),
-            //              description = std::ref(
-            //                  description)]() mutable -> corral::Task<void>
-            //                 {
-            //                     inja::json data;
-            //                     data["author"] = author.get().data();
-            //                     data["title"] = title.get().data();
-            //                     data["description"] =
-            //                     description.get().data(); data["link"] =
-            //                     link_str; auto summary_res = co_await
-            //                     summarize(
-            //                         semaphore_yt_dlp, semaphore_ollama,
-            //                         link_str, data, ioc, cache,
-            //                         cache_subtitles, cfg);
-            //
-            //                     if (!summary_res)
-            //                         {
-            //                             LOG_INFO("Failed to summarize: {}",
-            //                                      summary_res.error());
-            //                             co_return;
-            //                         }
-            //
-            //                     LOG_INFO(
-            //                         "Appending LLM's result to "
-            //                         "entry's description...");
-            //                     std::string new_description = fmt::format(
-            //                         "{}\n\nLLM's result:\n{}",
-            //                         description.get().data(), *summary_res);
-            //                     description.get().put("", new_description);
-            //                     LOG_INFO("Successfully appended, I
-            //                     guess...");
-            //                 });
-            //     }
+            for (const auto& category :
+                 std::filesystem::directory_iterator(cfg.path_to_repo))
+                {
+                    if (not category.is_directory())
+                        {
+                            continue;
+                        }
+                    std::string category_str
+                        = category.path().filename().string();
+                    if (not RE2::FullMatch(category_str, re_category))
+                        {
+                            continue;
+                        }
+
+                    for (const auto& pkg_name :
+                         std::filesystem::directory_iterator(category))
+                        {
+                            if (not pkg_name.is_directory())
+                                {
+                                    continue;
+                                }
+
+                            PackageType pkg_type = PackageType::Unknown;
+
+                            for (const auto& file :
+                                 std::filesystem::directory_iterator(pkg_name))
+                                {
+                                    if (not file.is_regular_file())
+                                        {
+                                            continue;
+                                        }
+
+                                    std::filesystem::path pkg_filename
+                                        = file.path().filename();
+
+                                    if (pkg_filename.extension() != ".ebuild")
+                                        {
+                                            continue;
+                                        }
+
+                                    std::string pkg_pv
+                                        = pkg_filename.stem().string();
+
+                                    if (RE2::FullMatch(pkg_pv, re_pkg_9999))
+                                        {
+                                            continue;
+                                        }
+
+                                    if (RE2::FullMatch(pkg_pv,
+                                                       re_pkg_with_date))
+                                        {
+                                            // get commit of current pkg
+                                            // extract service and link
+                                            // check if we support the service
+                                            // semaphore
+                                            // check for update
+                                        }
+
+                                    // get current version of the pkg
+                                    // extract service and link
+                                    // check if we support the service
+                                    // semaphore
+                                }
+                        }
+                }
+
             co_return corral::join;
         };
         LOG_INFO("Writing result to stdout...");
@@ -276,8 +291,6 @@ namespace
                     { return corral::Semaphore(concurrency_per_service); });
 
         co_await main_logic(ioc, tree, cfg, semaphores_per_services);
-
-        fmt::println("{}", res);
     }
 
 }  // namespace
@@ -317,6 +330,8 @@ int main(int argc, char* argv[])
         app.add_option("-l,--log-file", cfg.log_file,
                        "Filepath to internal logs")
             ->default_val("./logs.log");
+
+        app.add_option("-R,--repo-path", cfg.path_to_repo, "Filepath to repo");
 
         app.add_option("--log-level", log_level_str,
                        "Log level: "
