@@ -126,66 +126,6 @@ enum class ReturnCodes : int
 namespace
 {
 
-    corral::Task<std::expected<std::string, std::string>> get_subtitles(
-        auto& ioc, std::string const& link, Config const& cfg)
-    {
-        net::readable_pipe rp{ioc};
-        net::readable_pipe rp_err{ioc};
-        boost::process::shell cmd_get_subtitles = boost::process::shell(
-            R"(yt-dlp -q --no-progress --no-warnings --skip-download --write-subs --write-auto-subs  --sub-lang )"
-            + cfg.language
-            + R"( --convert-subs vtt --exec before_dl:"cat %(requested_subtitles.:.filepath)#q | sed -e '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9] --> [0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]/d' -e '/^[[:digit:]]\{1,3\}\$/d' -e 's/<[^>]*>//g' -e '/^[[:space:]]*$/d' -e '1,3d' -e \"s/'/\\\\'/g\" -e 's/\"/\\\"/g' | sed -z 's/\n/ /g' && rm %(requested_subtitles.:.filepath)#q " ')"
-            + link + "'");
-        auto exe = cmd_get_subtitles.exe();
-        auto proc = boost::process::process(
-            ioc, exe, cmd_get_subtitles.args(),
-            boost::process::process_stdio{
-                .in = {/* in to default */}, .out = rp, .err = rp_err});
-
-        auto read_loop = [](net::readable_pipe& p) -> corral::Task<std::string>
-            {
-                std::string res;
-                std::array<char, 4096> buf;
-                for (;;)
-                    {
-                        auto [error_code, received_size]
-                            = co_await p.async_read_some(
-                                net::buffer(buf),
-                                corral::asio_nothrow_awaitable);
-                        if (received_size)
-                            {
-                                res.append(buf.data(), received_size);
-                            }
-                        if (error_code)
-                            {
-                                co_return res;
-                            }
-                    }
-            };
-
-        auto wait_proc = [](boost::process::process& p) -> corral::Task<int>
-            {
-                auto [ec, exit_code]
-                    = co_await p.async_wait(corral::asio_nothrow_awaitable);
-                co_return exit_code;
-            };
-
-        LOG_INFO(logger, "Called yt-dlp for {} with {} language", link,
-                 cfg.language);
-        auto [ec_proc, subtitles_received, std_err_of_the_process]
-            = co_await corral::allOf(wait_proc(proc), read_loop(rp),
-                                     read_loop(rp_err));
-
-        if (not std_err_of_the_process.empty() || ec_proc != 0)
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to do yt-dlp: ec: {}\nstderr: {}\nstdout: {}",
-                    ec_proc, std_err_of_the_process, subtitles_received));
-            }
-
-        co_return subtitles_received;
-    }
-
     corral::Task<std::expected<std::string, std::string>> typical_http_request(
         auto& ioc, std::string const& request_body, const boost::url& url,
         beast::http::verb method, beast::http::fields headers)
@@ -403,90 +343,6 @@ namespace
             }
     }
 
-    corral::Task<std::expected<std::string, std::string>> summarize(
-        corral::Semaphore& semaphore_yt_dlp,
-        corral::Semaphore& semaphore_ollama, std::string const& link_str,
-        inja::json& data, auto& ioc, ABCCache& cache, ABCCache& cache_subtitles,
-        Config const& cfg)
-    {
-        LOG_INFO(logger, "Checking cache...");
-        std::optional<std::string> possible_res = cache.get(link_str);
-        if (possible_res.has_value())
-            {
-                LOG_INFO(logger, "Found result in cache.");
-                co_return *possible_res;
-            }
-        std::string summary;
-        LOG_INFO(logger, "Not found in cache.");
-
-        std::optional<std::string> maybe_subtitles
-            = cache_subtitles.get(link_str);
-        std::string subtitles;
-        if (maybe_subtitles.has_value())
-            {
-                subtitles = *maybe_subtitles;
-            }
-        else
-            {
-                std::string subtitles_received;
-
-                {
-                    auto lock = co_await semaphore_yt_dlp.lock();
-                    auto sub_res = co_await get_subtitles(ioc, link_str, cfg);
-                    if (!sub_res)
-                        {
-                            co_return std::unexpected(sub_res.error());
-                        }
-                    subtitles_received = std::move(*sub_res);
-                }
-
-                LOG_INFO(logger, "Received subtitles!");
-                LOG_TRACE_L1(logger, "Received subtitles: {}",
-                             subtitles_received);
-                subtitles = std::move(subtitles_received);
-                LOG_INFO(logger,
-                         "Saving received subtitles to "
-                         "subtitles's cache...");
-                cache_subtitles.set(link_str, subtitles);
-                LOG_INFO(logger,
-                         "Saved received subtitles to "
-                         "subtitles's cache.");
-            }
-
-        data["subtitles"] = subtitles;
-        std::string prompt = inja::render(cfg.prompt_template, data);
-
-        inja::json data_prompt;
-        boost::algorithm::replace_all(prompt, "\n", R"(\n)");
-        boost::algorithm::replace_all(prompt, "\"", R"(\")");
-        data_prompt["prompt"] = prompt;
-        std::string request_body
-            = inja::render(cfg.http_body_template, data_prompt);
-
-        std::string LLM_res;
-
-        {
-            auto lock = co_await semaphore_ollama.lock();
-            auto llm_res = co_await request_to_LLM(ioc, request_body, cfg);
-            if (!llm_res)
-                {
-                    co_return std::unexpected(llm_res.error());
-                }
-            LLM_res = std::move(*llm_res);
-        }
-
-        OllamaParser parser;
-
-        summary = parser.getResponse(LLM_res);
-
-        LOG_TRACE_L1(logger, "Received response:{}", LLM_res);
-        LOG_DEBUG(logger, "Saving response to cache");
-
-        cache.set(link_str, summary);
-
-        co_return summary;
-    }
-
     corral::Task<std::string> main_logic(auto& ioc,
                                          boost::property_tree::ptree tree,
                                          ABCCache& cache,
@@ -685,70 +541,6 @@ namespace
         co_return res;
     }
 
-    corral::Task<void> serve(auto& ioc, beast::tcp_stream stream,
-                             ABCCache& cache, ABCCache& cache_subtitles,
-                             Config const& cfg,
-                             corral::Semaphore& semaphore_yt_dlp,
-                             corral::Semaphore& semaphore_ollama)
-    {
-        beast::flat_buffer buffer;
-
-        beast::http::request<http::string_body> req;
-        auto [ec, bytes_read] = co_await beast::http::async_read(
-            stream, buffer, req, corral::asio_nothrow_awaitable);
-
-        if (ec)
-            {
-                co_return;
-            }
-
-        auto response_generator = co_await handle_request(
-            ioc, std::move(req), cache, cache_subtitles, cfg, semaphore_yt_dlp,
-            semaphore_ollama);
-
-        LOG_INFO(logger, "Sending response...");
-        auto [ec_write, bytes_written]
-            = co_await beast::async_write(stream, std::move(response_generator),
-                                          corral::asio_nothrow_awaitable);
-    }
-
-    corral::Task<void> server_acceptor(auto& ioc, ABCCache& cache,
-                                       ABCCache& cache_subtitles,
-                                       Config const& cfg)
-    {
-        corral::Semaphore semaphore_yt_dlp(cfg.concurrency_yt_dlp);
-        corral::Semaphore semaphore_ollama(cfg.concurrency_ollama);
-
-        net::ip::tcp::acceptor acceptor(
-            ioc, net::ip::tcp::endpoint(boost::asio::ip::tcp::v4(),
-                                        cfg.server_port));
-        CORRAL_WITH_NURSERY(nursery)
-        {
-            while (true)
-                {
-                    auto [ec, sock] = co_await acceptor.async_accept(
-                        corral::asio_nothrow_awaitable);
-                    if (ec)
-                        {
-                            continue;
-                        }
-
-                    beast::tcp_stream stream{std::move(sock)};
-                    LOG_INFO(logger, "New connection");
-
-                    nursery.start(
-                        [&](beast::tcp_stream stream) mutable
-                            {
-                                return serve(ioc, std::move(stream), cache,
-                                             cache_subtitles, cfg,
-                                             semaphore_yt_dlp,
-                                             semaphore_ollama);
-                            },
-                        std::move(stream));
-                }
-        };
-    }
-
 }  // namespace
 
 int main(int argc, char* argv[])
@@ -766,16 +558,6 @@ int main(int argc, char* argv[])
     std::string method_str = "post";
     std::vector<std::string> headers_raw = {"Content-Type: application/json"};
     std::string log_level_str = "info";
-
-    app.add_option("-c,--cache-folder", cfg.cache_file,
-                   "Folder, in which there will be files as cache of result "
-                   "of summarization")
-        ->required();
-
-    app.add_option("-S,--cache-folder-subtitles", cfg.cache_subtitles_file,
-                   "Folder, in which there will be files as subtitles of a "
-                   "specific YouTube link.")
-        ->required();
 
     app.add_option("-L,--language", cfg.language,
                    "yt-dlp language of subtitles")
@@ -805,35 +587,6 @@ int main(int argc, char* argv[])
     ]
 })");
 
-    app.add_option("-P,--prompt", cfg.prompt_template,
-                   "Prompt's Jinja template for an LLM")
-        ->default_val(
-            R"(Always be brutally honest (to the point of being a little bit rude), smart, and extremely laconic. 
-Do not rewrite instructions provided by user.
-You will be supplied with author's name, title, description and subtitles of a YouTube video. 
-Please, provide a summary with main points.
-
-Author's name:
-
-```
-{{ author }}
-```
-
-Title:
-```
-{{ title }}
-```
-
-```
-{{ description }}
-```
-
-Subtitles:
-
-```
-{{ subtitles }}
-```
-)");
 
     app.add_option("-H,--header", headers_raw,
                    "HTTP headers for request to an ?Ollama? instance.")
@@ -998,24 +751,10 @@ Subtitles:
             net::io_context ioc;
             LOG_DEBUG(logger, "Entering coroutine...");
             net::signal_set signals(ioc, SIGINT, SIGTERM);
-            if (not cfg.enable_server)
-                {
-                    corral::run(
-                        ioc, corral::anyOf(
-                                 async_main_no_server(ioc, cache,
-                                                      cache_subtitles, cfg),
-                                 signals.async_wait(corral::asio_awaitable)));
-                }
-            else
-                {
-                    LOG_INFO(logger, "Server started. Port: {}",
-                             cfg.server_port);
-                    corral::run(
-                        ioc,
-                        corral::anyOf(
-                            server_acceptor(ioc, cache, cache_subtitles, cfg),
-                            signals.async_wait(corral::asio_awaitable)));
-                }
+            corral::run(
+                ioc, corral::anyOf(
+                         async_main_no_server(ioc, cache, cache_subtitles, cfg),
+                         signals.async_wait(corral::asio_awaitable)));
         }
     catch (OmegaException<std::filesystem::path>& e)
         {
