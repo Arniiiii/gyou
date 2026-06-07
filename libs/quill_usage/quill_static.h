@@ -1,3 +1,7 @@
 #pragma once
 
-void setup_quill(char const* log_file);
+#include <filesystem>
+
+#include <quill/core/LogLevel.h>
+void setup_quill(std::filesystem::path const& log_file,
+                 quill::LogLevel log_level);

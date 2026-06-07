@@ -1,5 +1,11 @@
+#include <boost/asio/error.hpp>
+#include <boost/system/detail/error_code.hpp>
 
-
+#include "overwrite_log_macros.h"
+#include "quill_static.h"
+#define BOOST_STACKTRACE_USE_BACKTRACE 1
+#define BOOST_ASIO_HAS_FILE 1
+#define BOOST_ASIO_HAS_IO_URING 1
 #include <array>
 #include <filesystem>
 #include <iostream>
@@ -10,9 +16,12 @@
 #include <CLI/CLI.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/asio.hpp>
+#include <boost/asio/basic_stream_file.hpp>
+#include <boost/asio/file_base.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/asio/stream_file.hpp>
 #include <boost/beast.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
@@ -53,22 +62,22 @@
 #include <quill/Frontend.h>
 #include <quill/Logger.h>
 #include <quill/core/LogLevel.h>
+#include <quill/sinks/ConsoleSink.h>
 #include <quill/sinks/FileSink.h>
 #include <re2/re2.h>
 
+#include "gyou/array_utils.hpp"
 #include "gyou/boost_stacktrace_format.hpp"
 #include "gyou/http_requests.hpp"
 #include "gyou/omega_exception.hpp"
 
+// it is for getting real type from compiler when debugging via
+// `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
 template <typename T> struct Debug;
 
-extern quill::Logger* global_logger_a;
+constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
 
-constexpr size_t MAX_CONCURRENT_OLLAMA_DEFAULT = 6;
-
-namespace beast = boost::beast;
-namespace net = boost::asio;
-
+// NOLINTNEXTLINE(performance-enum-size)
 enum class Services : size_t
 {
     github = 0,
@@ -100,15 +109,67 @@ enum class Services : size_t
     vim = 26,
 };
 
+// Fucking C++ without C99 designated array initializer extension makes me do
+// this shit.
+constexpr auto ServicesNames = std::invoke(
+    []()
+        {
+            constexpr auto not_a_map_because_of_fucking_cpp = std::to_array({
+                // clang-format off
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::bitbucket),"https://bitbucket.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::codeberg),"https://codeberg.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpan),"https://metacpan.org/dist/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpan_module),"https://metacpan.org/pod/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpe),"cpe:/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cran),"https://cran.r-project.org/web/packages/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::ctan),"https://ctan.org/pkg/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::freedesktop_gitlab),"https://gitlab.freedesktop.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gentoo),"https://gitweb.gentoo.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::github),"https://github.com/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gitlab),"https://gitlab.com/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gnome_gitlab),"https://gitlab.gnome.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::google_code),"https://code.google.com/archive/p/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::hackage),"https://hackage.haskell.org/package/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::heptapod),"https://foss.heptapod.net/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::kde_invent),"https://invent.kde.org/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::launchpad),"https://launchpad.net/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::osdn),"https://osdn.net/projects/.*/"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pear),"https://pear.php.net/package/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pecl),"https://pecl.php.net/package/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pypi),"https://pypi.org/project/.*/"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::rubygems),"https://rubygems.org/gems/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::savannah),"https://savannah.gnu.org/projects/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::savannah_nongnu),"https://savannah.nongnu.org/projects/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::sourceforge),"https://sourceforge.net/projects/.*/"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::sourcehut),"https://sr.ht/.*"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::vim),"https://www.vim.org/scripts/script.php?script_id=.*")
+                // clang-format on
+            });
+
+            std::array<std::string_view,
+                       std::size(not_a_map_because_of_fucking_cpp)>
+                arr;
+
+            for (size_t i = 0; i < std::size(not_a_map_because_of_fucking_cpp);
+                 ++i)
+                {
+                    arr.at(i) = not_a_map_because_of_fucking_cpp.at(i).second;
+                }
+
+            return arr;
+        });
+
 struct Config
 {
-    boost::url url;
-    beast::http::verb method;
-    beast::http::fields headers;
+    boost::beast::http::fields headers;
     std::filesystem::path log_file;
-    quill::LogLevel log_level;
-    size_t concurrency_per_service{};
     std::filesystem::path path_to_repo;
+    std::filesystem::path path_to_portage_bin;
+    std::filesystem::path path_to_portage_temp;
+    std::filesystem::path path_to_portage_pym;
+    std::filesystem::path path_to_gentoo_repo;
+    quill::LogLevel log_level{};
+    size_t concurrency_per_service{};
 };
 
 struct EntryData
@@ -119,66 +180,229 @@ struct EntryData
     std::string description;
 };
 
-struct RequestServer
-{
-    std::string url;
-};
 // NOLINTNEXTLINE(performance-enum-size)
-enum class ReturnCodes : int
+enum class ReturnCode : int
 {
     Success = 0,
-    FailDuringParsingCmdValues = 1,
-    FailSpecifiedValueIsIncorrect = 2,
-    FailDuringInitializationConfig = 3,
-    FailCacheFolder = 4,
-    FailStandardException = 5,
-    FailParsePromptResult = 6,
-    FailInitializationLogger = 7,
+    PartialSuccess = 1,
+    AllHaveFailed = 2,
+    NoEbuildFound = 3,
+    FailDuringParsingCmdValues = 4,
+    FailSpecifiedValueIsIncorrect = 5,
+    FailDuringInitializationConfig = 6,
+    FailStandardException = 7,
+    FailParsePromptResult = 8,
+    FailInitializationLogger = 9,
+    ReceivedCancellationSignal = 10,
 
 };
 
 enum class PackageType
 {
     Unknown,
-    Release,
+    ReleaseOrTag,
     Commit,
 };
 
 namespace
 {
 
-    template <std::size_t N, typename F> auto make_array_from_factory(F f)
-        -> std::array<std::decay_t<decltype(f())>, N>
+    struct DataFromEbuild
     {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>)
+        std::string src_uri_str;
+        std::optional<std::string> commit;
+    };
+
+    struct EntryToChange
+    {
+        std::string old_name;
+        std::string new_name;
+
+        std::optional<std::string> commit;
+    };
+
+    [[nodiscard]] corral::Task<
+        std::expected<std::string, boost::system::error_code>>
+    file_to_string(auto& ioc, std::filesystem::path const& file_path)
+    {
+        boost::asio::stream_file file_reader(
+            ioc, file_path, boost::asio::stream_file::read_only);
+
+        std::string str_of_file;
+        str_of_file.reserve(file_reader.size());
+
+        auto&& [errc, bytes_read] = co_await boost::asio::async_read(
+            file_reader, boost::asio::buffer(str_of_file),
+            corral::asio_nothrow_awaitable);
+        if (errc && boost::asio::error::eof != errc)
             {
-                return std::array<std::decay_t<decltype(f())>, N>{
-                    {(static_cast<void>(Is), f())...}};
-            }(std::make_index_sequence<N>());
+                co_return std::unexpected(errc);
+            }
+        co_return str_of_file;
     }
 
-    corral::Task<std::expected<std::string, std::string>> request_to_LLM(
-        auto& ioc, std::string& request_body, Config const& cfg)
+    [[nodiscard]] corral::Task<
+        std::expected<std::filesystem::path, std::string>>
+    bash_ebuild(auto& ioc, Config const& cfg,
+                std::filesystem::path const& path_to_ebuild)
     {
-        if ("https" == cfg.url.scheme())
+        std::string pkg_name = path_to_ebuild.filename().stem().string();
+        std::string category = path_to_ebuild.parent_path().filename().string();
+
+        std::filesystem::path temp_folder
+            = (cfg.path_to_portage_temp / category / pkg_name).concat("/");
+
+        std::unordered_map<boost::process::environment::key,
+                           boost::process::environment::value>
+            env_for_ebuild = {
+                {"EBUILD", path_to_ebuild.string()},
+                {"T", temp_folder.string()},
+                {"PORTAGE_BIN_PATH", cfg.path_to_portage_bin.string()},
+                {"PORTAGE_PYM_PATH", cfg.path_to_portage_pym.string()},
+                {"PORTAGE_ECLASS_LOCATIONS_STR",
+                 cfg.path_to_gentoo_repo.string() + ":"
+                     + cfg.path_to_repo.string()},
+                {"EBUILD_PHASE", "_internal_test"},
+                {"CATEGORY", category},
+                {"PF", pkg_name},
+            };
+
+        boost::asio::readable_pipe rp_stdout{ioc};
+        boost::asio::readable_pipe rp_stderr{ioc};
+
+        std::string shell_args
+            = (cfg.path_to_portage_bin / "ebuild.sh").string()
+              + " _internal_test " + path_to_ebuild.string();
+
+        boost::process::shell cmd_get_subtitles
+            = boost::process::shell(shell_args);
+
+        auto exe = cmd_get_subtitles.exe();
+        auto proc = boost::process::process(
+            ioc, exe, cmd_get_subtitles.args(),
+            boost::process::process_stdio{.in = {/* in to default */},
+                                          .out = rp_stdout,
+                                          .err = rp_stderr});
+
+        auto read_loop = [](boost::asio::readable_pipe& p) -> corral::Task<std::string>
             {
-                co_return co_await typical_https_request(
-                    ioc, request_body, cfg.url, cfg.method, cfg.headers);
-            }
-        else
+                std::string res;
+                std::array<char, 4096> buf;
+                for (;;)
+                    {
+                        auto [error_code, received_size]
+                            = co_await p.async_read_some(
+                                boost::asio::buffer(buf),
+                                corral::asio_nothrow_awaitable);
+                        if (received_size)
+                            {
+                                res.append(buf.data(), received_size);
+                            }
+                        if (error_code)
+                            {
+                                co_return res;
+                            }
+                    }
+            };
+
+        auto wait_proc = [](boost::process::process& p) -> corral::Task<int>
             {
-                co_return co_await typical_http_request(
-                    ioc, request_body, cfg.url, cfg.method, cfg.headers);
+                auto [ec, exit_code]
+                    = co_await p.async_wait(corral::asio_nothrow_awaitable);
+                co_return exit_code;
+            };
+
+        LOG_DEBUG("Doing sth in bash: {}", shell_args);
+
+        auto [errc_proc, stdout_str, stderr_str] = co_await corral::allOf(
+            wait_proc(proc), read_loop(rp_stdout), read_loop(rp_stderr));
+
+        if (not stderr_str.empty() || errc_proc != 0)
+            {
+                co_return std::unexpected(fmt::format(
+                    "Failed to do yt-dlp: ec: {}\nstderr: {}\nstdout: {}",
+                    errc_proc, stderr_str, stdout_str));
             }
+
+        co_return temp_folder;
     }
 
-    corral::Task<std::string> main_logic(auto& ioc,
-                                         boost::property_tree::ptree tree,
-                                         Config const& cfg, auto& semaphores)
+    // get current version of the pkg or commit of
+    // current pkg extract service and link
+    // check if we support the service
+    // semaphore
+    // check for update
+    //  return what to change
+    [[nodiscard]] corral::Task<std::expected<DataFromEbuild, std::string>>
+    logic_per_ebuild(auto& ioc, Config const& cfg, PackageType pkg_type,
+                     std::filesystem::path const& path_to_ebuild,
+                     auto& semaphores, RE2 const& re_commit_str,
+                     RE2 const& re_src_uri, uint64_t date)
     {
+        auto temp_folder_path_res
+            = co_await bash_ebuild(ioc, cfg, path_to_ebuild);
+
+        if (!temp_folder_path_res)
+            {
+                co_return std::unexpected(
+                    fmt::format("Failed to run ebuild.sh: {}",
+                                temp_folder_path_res.error()));
+            }
+        std::filesystem::path temp_file_path
+            = (temp_folder_path_res.value() / "temp");
+
+        auto str_file_res = co_await file_to_string(ioc, temp_file_path);
+        if (not str_file_res)
+            {
+                co_return std::unexpected(
+                    fmt::format("Failed to read file. error: {}",
+                                str_file_res.error().message()));
+            }
+        std::string_view commit_env_var_name;
+
+        std::string_view commit;
+        if (PackageType::Commit == pkg_type)
+            {
+                if (not RE2::FullMatch(str_file_res.value(), re_commit_str,
+                                       &commit_env_var_name, &commit))
+                    {
+                        co_return std::unexpected(
+                            fmt::format("Regex for getting commit failed: {}",
+                                        re_commit_str.error()));
+                    };
+            }
+
+        // get first url in SRC_URI
+        std::string_view src_uri_str;
+
+        if (not RE2::FullMatch(str_file_res.value(), re_src_uri, &src_uri_str))
+            {
+                co_return std::unexpected(fmt::format(
+                    "Regex for getting first URL from SRC_URI failed: {}",
+                    re_src_uri.error()));
+            }
+
+        // understand what service is this
+    }
+
+    [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
+                                                       Config const& cfg,
+                                                       auto& semaphores)
+    {
+        // to compile them all at once
+        RE2 re_commit_str(
+            R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
+            RE2::Quiet);
+        RE2 re_src_uri(
+            R"delimiter(declare SRC_URI="(https?://\S*)(?: -> \S* ?.*)?"\n)delimiter",
+            RE2::Quiet);
         RE2 re_category(R"(([\w][\w+.-]*))", RE2::Quiet);
         RE2 re_pkg_9999(R"([\w+.-]*9999)", RE2::Quiet);
         RE2 re_pkg_with_date(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet);
+
+        std::vector<DataFromEbuild> bash_res;
+        bool is_any_successful = false;
+        bool is_any_failed = false;
 
         CORRAL_WITH_NURSERY(nursery)
         {
@@ -204,8 +428,6 @@ namespace
                                     continue;
                                 }
 
-                            PackageType pkg_type = PackageType::Unknown;
-
                             for (const auto& file :
                                  std::filesystem::directory_iterator(pkg_name))
                                 {
@@ -230,20 +452,58 @@ namespace
                                             continue;
                                         }
 
-                                    if (RE2::FullMatch(pkg_pv,
-                                                       re_pkg_with_date))
+                                    auto pkg_type = PackageType::Unknown;
+
+                                    uint64_t date = 0;
+
+                                    if (RE2::FullMatch(pkg_pv, re_pkg_with_date,
+                                                       &date))
                                         {
-                                            // get commit of current pkg
-                                            // extract service and link
-                                            // check if we support the service
-                                            // semaphore
-                                            // check for update
+                                            pkg_type = PackageType::Commit;
+                                            LOG_INFO(
+                                                "This is a package per "
+                                                "commit: "
+                                                "{} . Its date: {}",
+                                                pkg_pv, &date);
+                                        }
+                                    else
+                                        {
+                                            pkg_type
+                                                = PackageType::ReleaseOrTag;
+                                            LOG_INFO(
+                                                "This is a package per "
+                                                "release: {}",
+                                                pkg_pv);
                                         }
 
-                                    // get current version of the pkg
-                                    // extract service and link
-                                    // check if we support the service
-                                    // semaphore
+                                    nursery.start(
+                                        [&](PackageType pkg_type_arg,
+                                            std::filesystem::path
+                                                file_arg) mutable
+                                            -> corral::Task<void>
+                                            {
+                                                auto sth
+                                                    = co_await logic_per_ebuild(
+                                                        ioc, cfg, pkg_type_arg,
+                                                        file_arg, semaphores,
+                                                        re_commit_str,
+                                                        re_src_uri, date);
+                                                if (!sth)
+                                                    {
+                                                        is_any_failed = true;
+                                                        LOG_ERROR(
+                                                            "Failed to do "
+                                                            "sth "
+                                                            "with a "
+                                                            "ebuild: {}",
+                                                            sth.error());
+                                                        co_return;
+                                                    }
+                                                bash_res.emplace_back(
+                                                    sth.value());
+                                                is_any_successful = true;
+                                            },
+                                        pkg_type, file);
                                 }
                         }
                 }
@@ -251,14 +511,40 @@ namespace
             co_return corral::join;
         };
         LOG_INFO("Writing result to stdout...");
-        std::stringstream strs;
-        boost::property_tree::write_xml(strs, tree);
+        // std::stringstream strs;
+        // boost::property_tree::write_xml(strs, tree);
         LOG_INFO("Wrote result to stdout.");
-        co_return strs.str();
+        // co_return strs.str();
+        if (is_any_failed and is_any_successful)
+            {
+                co_return ReturnCode::PartialSuccess;
+            }
+        else if (is_any_failed and not is_any_successful)
+            {
+                co_return ReturnCode::AllHaveFailed;
+            }
+        else if (not is_any_successful)
+            {
+                co_return ReturnCode::NoEbuildFound;
+            }
+        else
+            {
+                co_return ReturnCode::Success;
+                ;
+            }
     }
 
     boost::property_tree::ptree parse_rss_into_tree(std::string const& rss_feed)
     {
+        // LOG_DEBUG("Waiting for YouTube's RSS feed from stdin...");
+        // std::cin >> std::noskipws;
+        // std::istreambuf_iterator<char> start(std::cin);
+        // std::istreambuf_iterator<char> end;
+        // std::string xml_rss_youtube_feed(start, end);
+        // LOG_DEBUG("Received the YouTube's RSS feed.");
+        //
+        // boost::property_tree::ptree tree
+        //     = parse_rss_into_tree(xml_rss_youtube_feed);
         LOG_DEBUG("Received something from stdin...");
         LOG_TRACE_L1("rss_feed: {}", rss_feed);
         boost::property_tree::ptree tree;
@@ -269,18 +555,8 @@ namespace
         return tree;
     }
 
-    corral::Task<void> actual_main(auto& ioc, Config const& cfg)
+    corral::Task<ReturnCode> actual_chief(auto& ioc, Config const& cfg)
     {
-        LOG_DEBUG("Waiting for YouTube's RSS feed from stdin...");
-        std::cin >> std::noskipws;
-        std::istreambuf_iterator<char> start(std::cin);
-        std::istreambuf_iterator<char> end;
-        std::string xml_rss_youtube_feed(start, end);
-        LOG_DEBUG("Received the YouTube's RSS feed.");
-
-        boost::property_tree::ptree tree
-            = parse_rss_into_tree(xml_rss_youtube_feed);
-
         constexpr size_t amount_of_services
             = magic_enum::enum_count<Services>();
 
@@ -290,7 +566,9 @@ namespace
                 [concurrency_per_service = cfg.concurrency_per_service]()
                     { return corral::Semaphore(concurrency_per_service); });
 
-        co_await main_logic(ioc, tree, cfg, semaphores_per_services);
+        ReturnCode res
+            = co_await chief_logic(ioc, cfg, semaphores_per_services);
+        co_return res;
     }
 
 }  // namespace
@@ -299,6 +577,7 @@ int main(int argc, char* argv[])
 {
     Config cfg;
 
+    // Config parsing
     {
         CLI::App app{
             "Post-processor for YouTube's RSS feed, so that you get "
@@ -307,21 +586,9 @@ int main(int argc, char* argv[])
 
         // Temporary storage for CLI11 to map types it doesn't handle
         // natively without custom validators
-        std::string url_str = "http://127.0.0.1:11434/api/chat";
-        std::string method_str = "post";
         std::vector<std::string> headers_raw
             = {"Content-Type: application/json"};
         std::string log_level_str = "info";
-
-        app.add_option("-u,--url", url_str,
-                       "URL of ?Ollama? instance in format "
-                       "http://127.0.0.1:11434/api/chat")
-            ->capture_default_str();
-
-        app.add_option("-X,--method", method_str,
-                       "HTTP method by which to ask an ?Ollama? instance. "
-                       "Possible values: get, post, head, patch, purge etc.")
-            ->capture_default_str();
 
         app.add_option("-H,--header", headers_raw,
                        "HTTP headers for request to an ?Ollama? instance.")
@@ -331,7 +598,27 @@ int main(int argc, char* argv[])
                        "Filepath to internal logs")
             ->default_val("./logs.log");
 
-        app.add_option("-R,--repo-path", cfg.path_to_repo, "Filepath to repo");
+        app.add_option("-R,--repo-path", cfg.path_to_repo, "Filepath to repo")
+            ->required();
+
+        app.add_option("-t,--tmp-path", cfg.path_to_portage_temp,
+                       "Filepath to portage's tmp")
+            ->required();
+
+        app.add_option("-G,--gentoo-repo-path", cfg.path_to_gentoo_repo,
+                       "Filepath to gentoo's repo path")
+            ->default_val("/var/db/repos/gentoo/");
+
+        app.add_option("-P,--portage-bin-path", cfg.path_to_portage_bin,
+                       "Filepath to portage's bin folder i.e. `git clone "
+                       "https://github.com/Arniiiii/portage` and give the path "
+                       "to `./bin/` folder")
+            ->required();
+
+        app.add_option("-Y,--portage-pym-path", cfg.path_to_portage_pym,
+                       "Filepath to portage's PYM folder. I have no idea what "
+                       "this is, but it can be any empty folder. ")
+            ->required();
 
         app.add_option("--log-level", log_level_str,
                        "Log level: "
@@ -343,22 +630,10 @@ int main(int argc, char* argv[])
                        "Amount of concurrent request per service"
                        "by this application")
             ->check(CLI::PositiveNumber)
-            ->default_val(MAX_CONCURRENT_OLLAMA_DEFAULT);
+            ->default_val(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE);
         try
             {
                 app.parse(argc, argv);
-
-                // Post-processing complex types
-                cfg.url = boost::urls::url(url_str);
-
-                auto verb_opt
-                    = magic_enum::enum_cast<beast::http::verb>(method_str);
-                if (!verb_opt)
-                    {
-                        throw CLI::ValidationError(
-                            "method", "Invalid HTTP method: " + method_str);
-                    }
-                cfg.method = *verb_opt;
 
                 cfg.log_level = quill::loglevel_from_string(log_level_str);
 
@@ -405,7 +680,7 @@ int main(int argc, char* argv[])
 
                 fmt::print(std::cerr, "{}", log);
                 return std::to_underlying(
-                    ReturnCodes::FailSpecifiedValueIsIncorrect);
+                    ReturnCode::FailSpecifiedValueIsIncorrect);
             }
         catch (std::exception& e)
             {
@@ -425,30 +700,14 @@ int main(int argc, char* argv[])
                            "youself debugging this shit.\n{}\n",
                            e.what(), boost::stacktrace::to_string(trace));
                 return std::to_underlying(
-                    ReturnCodes::FailDuringInitializationConfig);
+                    ReturnCode::FailDuringInitializationConfig);
             }
     }
 
+    // Enabling logging
     try
         {
-            // Setup sink and logger
-            auto file_sink
-                = quill::Frontend::create_or_get_sink<quill::FileSink>(
-                    cfg.log_file,
-                    []()
-                        {
-                            quill::FileSinkConfig config_quill;
-                            config_quill.set_open_mode('w');
-                            // config_quill.set_filename_append_option (
-                            //     quill::FilenameAppendOption::StartDateTime);
-                            return config_quill;
-                        }(),
-                    quill::FileEventNotifier{});
-
-            // Create and store the logger
-            global_logger_a = quill::Frontend::create_or_get_logger(
-                "root", std::move(file_sink));
-            global_logger_a->set_log_level(cfg.log_level);
+            setup_quill(cfg.log_file, cfg.log_level);
         }
     catch (std::exception& e)
         {
@@ -466,48 +725,23 @@ int main(int argc, char* argv[])
                        "works or kill "
                        "youself debugging this shit.\n{}\n",
                        e.what(), boost::stacktrace::to_string(trace));
-            return std::to_underlying(ReturnCodes::FailInitializationLogger);
+            return std::to_underlying(ReturnCode::FailInitializationLogger);
         }
 
+    // Finally main.
     try
         {
-            quill::BackendOptions backend_options;
-            backend_options.check_printable_char = {};
-            quill::Backend::start(backend_options);
-
-            LOG_DEBUG("Successfully parsed command line arguments.");
-
-            LOG_INFO("Trying to parse supplied headers...");
-
-            net::io_context ioc;
-            LOG_DEBUG("Entering coroutine...");
-            net::signal_set signals(ioc, SIGINT, SIGTERM);
-            corral::run(
-                ioc, corral::anyOf(actual_main(ioc, cfg),
+            boost::asio::io_context ioc;
+            LOG_DEBUG("Entering asynchronous main...");
+            boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
+            auto&& [main_opt, signals_opt] = corral::run(
+                ioc, corral::anyOf(actual_chief(ioc, cfg),
                                    signals.async_wait(corral::asio_awaitable)));
-        }
-    catch (OmegaException<std::filesystem::path>& e)
-        {
-            boost::stacktrace::basic_stacktrace<
-                std::allocator<boost::stacktrace::frame>>
-                trace = boost::stacktrace::stacktrace::from_current_exception();
-            std::string log = fmt::format(
-                "Oohh, look at you, who got an exception, my cutie lovely "
-                "guy. "
-                "\nThis is an Omega exception. Here's "
-                ".what():\n\n{}\nHere's data:\n{}\n Here's "
-                "trace:\n{}\nHere's "
-                "line where something failed:\n{}\n\nHere's an attempt to "
-                "get "
-                "backtrace of it "
-                "via "
-                "boost::stacktrace and libbacktrace...",
-                e.what(), e.data(), e.stack(), e.where(),
-                boost::stacktrace::to_string(trace));
-
-            fmt::print(std::cerr, "{}", log);
-            LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCodes::FailCacheFolder);
+            if (main_opt)
+                {
+                    return std::to_underlying(main_opt.value());
+                }
+            return std::to_underlying(ReturnCode::ReceivedCancellationSignal);
         }
     catch (OmegaException<std::string>& e)
         {
@@ -532,7 +766,7 @@ int main(int argc, char* argv[])
 
             fmt::print(std::cerr, "{}", log);
             LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCodes::FailParsePromptResult);
+            return std::to_underlying(ReturnCode::FailParsePromptResult);
         }
     catch (std::exception& e)
         {
@@ -553,7 +787,6 @@ int main(int argc, char* argv[])
 
             fmt::print(std::cerr, "{}", log);
             LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCodes::FailStandardException);
+            return std::to_underlying(ReturnCode::FailStandardException);
         }
-    return std::to_underlying(ReturnCodes::Success);
 }

@@ -62,6 +62,8 @@ find_package(CLI11 REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11)
 find_package(re2 REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE re2::re2)
+find_package(liburing REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE liburing::liburing)
 
 # target_link_libraries(${PROJECT_NAME} PRIVATE GTest::gtest_main)
 if(TARGET quill::quill)

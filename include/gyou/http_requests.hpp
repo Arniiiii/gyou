@@ -77,8 +77,7 @@ corral::Task<std::expected<std::string, std::string>> typical_http_request(
 
     boost::beast::flat_buffer buffer(MAX_EXPECTED_CHARACTERS);
 
-    boost::beast::http::response<boost::beast::http::string_body>
-        response;
+    boost::beast::http::response<boost::beast::http::string_body> response;
 
     LOG_INFO("Waiting for response...");
     auto [ec_read, bytes_read] = co_await boost::beast::http::async_read(
@@ -113,15 +112,13 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
     auto& ioc, std::string const& request_body, boost::url const& url,
     boost::beast::http::verb method, const boost::beast::http::fields& headers)
 {
-    boost::asio::ssl::context sslCtx(
-        boost::asio::ssl::context::tlsv13);
+    boost::asio::ssl::context sslCtx(boost::asio::ssl::context::tlsv13);
 
     sslCtx.set_verify_mode(boost::asio::ssl::verify_peer);
     sslCtx.set_default_verify_paths();
 
     auto resolver = boost::asio::ip::tcp::resolver{ioc};
-    boost::asio::ssl::stream<boost::beast::tcp_stream> stream(
-        ioc, sslCtx);
+    boost::asio::ssl::stream<boost::beast::tcp_stream> stream(ioc, sslCtx);
 
     stream.set_verify_callback(
         boost::asio::ssl::host_name_verification(url.host_name()));
@@ -198,8 +195,7 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
 
     boost::beast::flat_buffer buffer(MAX_EXPECTED_CHARACTERS);
 
-    boost::beast::http::response<boost::beast::http::string_body>
-        response;
+    boost::beast::http::response<boost::beast::http::string_body> response;
 
     LOG_INFO("Waiting for response...");
     auto [ec_read, bytes_read] = co_await boost::beast::http::async_read(
@@ -227,6 +223,23 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
         }
 
     co_return response.body();
+}
+
+corral::Task<std::expected<std::string, std::string>> request_internet(
+    auto& ioc, std::string& request_body, boost::urls::url const& url,
+    boost::beast::http::verb method,
+    boost::beast::http::header<true> const& headers)
+{
+    if ("https" == url.scheme())
+        {
+            co_return co_await typical_https_request(ioc, request_body, url,
+                                                     method, headers);
+        }
+    else
+        {
+            co_return co_await typical_http_request(ioc, request_body, url,
+                                                    method, headers);
+        }
 }
 
 #endif  // INCLUDE_INCLUDE_HTTP_REQUESTS_HPP_

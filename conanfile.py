@@ -22,6 +22,7 @@ class CompressorRecipe(ConanFile):
         self.requires("glaze/[~7]")
         self.requires("openssl/[~3]")
         self.requires("re2/20251105") 
+        self.requires("liburing/[~2]")
 
     def build_requirements(self):
         self.tool_requires("cmake/3.27.9")
