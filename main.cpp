@@ -330,15 +330,16 @@ namespace
 
     // get current version of the pkg or commit of
     // current pkg extract service and link
-    // check if we support the service
-    // semaphore
-    // check for update
-    //  return what to change
-    [[nodiscard]] corral::Task<std::expected<int, std::string>>
-    logic_per_ebuild(auto& ioc, Config const& cfg,
-                     std::filesystem::directory_entry const& path_to_ebuild,
-                     auto& semaphores, CommonContext& common_ctx)
+    [[nodiscard]] corral::Task<std::expected<EbuildSpecificData, std::string>>
+    get_ebuild_info(auto& ioc, Config const& cfg, CommonContext& common_ctx,
+                    std::filesystem::directory_entry const& path_to_ebuild)
     {
+        std::string category_str = path_to_ebuild.path()
+                                       .parent_path()
+                                       .parent_path()
+                                       .filename()
+                                       .string();
+
         auto pkg_type = PackageType::Unknown;
 
         std::string pkg_p = path_to_ebuild.path().filename().stem().string();
@@ -383,8 +384,10 @@ namespace
                 ++match_id;
             }
 
-        auto pv = std::string_view{common_ctx.re_version_matcher[1].first,
+        auto pn = std::string_view{common_ctx.re_version_matcher[1].first,
                                    common_ctx.re_version_matcher[1].second};
+        auto pv = std::string_view{common_ctx.re_version_matcher[2].first,
+                                   common_ctx.re_version_matcher[2].second};
         LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
         auto temp_folder_path_res
             = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pv);
@@ -459,19 +462,67 @@ namespace
 
         LOG_DEBUG("Matched these: {}", magic_enum::enum_name(service_id));
 
-        {
-            // what is url of a feed for the service and the package?
-            // get feed, limit via semaphores
-            // write a concept, that has corral::Task<std::expected<std::string,
-            // ...>> get_new_version(common_data, data, semaphores, ioc), write
-            // 27 different handlers. auto lock = co_await semaphores
-            //                 .at(static_cast<size_t>(indeces_matched[0]))
-            //                 .lock();
-        }
+        co_return EbuildSpecificData{
+            .filepath = path_to_ebuild,
+            .p = pkg_p,
+            .pv = std::string(pv),
+            .pn = std::string(pn),
+            .category = category_str,
+            .first_uri = std::string(src_uri_str),
+            .commit_specific = std::invoke(
+                [&]() -> std::optional<CommitSpecific>
+                    {
+                        if (PackageType::Commit == pkg_type)
+                            {
+                                return CommitSpecific{
+                                    .date = date,
+                                    .commit = std::string{commit}};
+                            }
+
+                        return std::nullopt;
+                    }),
+            .service = service_id};
+    }
+
+    // check if we support the service
+    // semaphore
+    // check for update
+    [[nodiscard]] corral::Task<std::expected<int, std::string>> get_latest_info(
+        auto& ioc, Config const& cfg, auto& semaphores,
+        CommonContext& common_ctx, EbuildSpecificData& ebuild_data)
+    {
+        // what is url of a feed for the service and the package?
+        // get feed, limit via semaphores
+        // write a concept, that has corral::Task<std::expected<std::string,
+        // ...>> get_new_version(common_data, data, semaphores, ioc), write
+        // 27 different handlers. auto lock = co_await semaphores
+        //                 .at(static_cast<size_t>(indeces_matched[0]))
+        //                 .lock();
+
+        co_return 0;
+    }
+
+    //  return what to change
+    [[nodiscard]] corral::Task<std::expected<int, std::string>>
+    logic_per_ebuild(auto& ioc, Config const& cfg,
+                     std::filesystem::directory_entry const& path_to_ebuild,
+                     auto& semaphores, CommonContext& common_ctx)
+    {
+        std::expected<EbuildSpecificData, std::string> ebuild_data_res
+            = co_await get_ebuild_info(ioc, cfg, common_ctx, path_to_ebuild);
+        if (not ebuild_data_res)
+            {
+                co_return std::unexpected(ebuild_data_res.error());
+            }
+
+        auto sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
+                                            ebuild_data_res.value());
+
+
 
         // return what has to be changed
 
-        co_return 1;
+        co_return 0;
     }
 
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
@@ -481,7 +532,7 @@ namespace
         // to compile them all at once
         // NOLINTBEGIN(hicpp-signed-bitwise)
         std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
-            R"([\w][\w+-]*?-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
+            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
             reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
         // NOLINTEND(hicpp-signed-bitwise)
 
