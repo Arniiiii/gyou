@@ -200,22 +200,37 @@ enum class PackageType
     Commit,
 };
 
+struct CommonContext
+{
+    RE2 re_commit_str;
+    RE2 re_src_uri;
+    RE2 re_category;
+    RE2 re_pkg_9999;
+    RE2 re_pkg_with_date;
+    RE2::Set re_set_services;
+    reflex::PCRE2UTFMatcher re_version_matcher;
+};
+
+struct CommitSpecific
+{
+    uint64_t date;
+    std::string commit;
+};
+
+struct EbuildSpecificData
+{
+    std::filesystem::path filepath;
+    std::string p;
+    std::string pv;
+    std::string pn;
+    std::string category;
+    std::string first_uri;
+    std::optional<CommitSpecific> commit_specific;
+    Service service;
+};
+
 namespace
 {
-
-    struct DataFromEbuild
-    {
-        std::string src_uri_str;
-        std::optional<std::string> commit;
-    };
-
-    struct EntryToChange
-    {
-        std::string old_name;
-        std::string new_name;
-
-        std::optional<std::string> commit;
-    };
 
     [[nodiscard]] corral::Task<
         std::expected<std::string, boost::system::error_code>>
@@ -320,15 +335,59 @@ namespace
     // check for update
     //  return what to change
     [[nodiscard]] corral::Task<std::expected<int, std::string>>
-    logic_per_ebuild(auto& ioc, Config const& cfg, PackageType pkg_type,
-                     std::filesystem::path const& path_to_ebuild,
-                     auto& semaphores, RE2 const& re_commit_str,
-                     RE2 const& re_src_uri, RE2::Set const& re_set_services,
-                     uint64_t date, std::string_view pv)
+    logic_per_ebuild(auto& ioc, Config const& cfg,
+                     std::filesystem::directory_entry const& path_to_ebuild,
+                     auto& semaphores, CommonContext& common_ctx)
     {
-        LOG_DEBUG("Doing bash for {}", path_to_ebuild);
+        auto pkg_type = PackageType::Unknown;
+
+        std::string pkg_p = path_to_ebuild.path().filename().stem().string();
+        uint64_t date = 0;
+
+        if (RE2::FullMatch(pkg_p, common_ctx.re_pkg_with_date, &date))
+            {
+                pkg_type = PackageType::Commit;
+                LOG_INFO(
+                    "This is a package per "
+                    "commit: "
+                    "{} . Its date: {}",
+                    pkg_p, date);
+            }
+        else
+            {
+                pkg_type = PackageType::ReleaseOrTag;
+                LOG_INFO(
+                    "This is a package per "
+                    "release: {}",
+                    pkg_p);
+            }
+
+        common_ctx.re_version_matcher.input(pkg_p);
+        if (not common_ctx.re_version_matcher.find())
+            {
+                co_return std::unexpected(fmt::format(
+                    "Failed to parse version of package : {}", pkg_p));
+            }
+
+        size_t match_id = 0;
+        while (common_ctx.re_version_matcher[match_id].first != nullptr)
+            {
+                LOG_DEBUG("sth: {}",
+                          std::string_view{
+                              common_ctx.re_version_matcher[match_id].first,
+                              common_ctx.re_version_matcher[match_id].second});
+                if (common_ctx.re_version_matcher[match_id].first == nullptr)
+                    {
+                        LOG_DEBUG("It is nullptr.");
+                    }
+                ++match_id;
+            }
+
+        auto pv = std::string_view{common_ctx.re_version_matcher[1].first,
+                                   common_ctx.re_version_matcher[1].second};
+        LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
         auto temp_folder_path_res
-            = co_await bash_ebuild(ioc, cfg, path_to_ebuild, pv);
+            = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pv);
 
         if (!temp_folder_path_res)
             {
@@ -355,12 +414,14 @@ namespace
         std::string_view commit;
         if (PackageType::Commit == pkg_type)
             {
-                if (not RE2::PartialMatch(str_file_res.value(), re_commit_str,
+                if (not RE2::PartialMatch(str_file_res.value(),
+                                          common_ctx.re_commit_str,
                                           &commit_env_var_name, &commit))
                     {
                         co_return std::unexpected(
-                            fmt::format("Regex for getting commit failed: {}",
-                                        re_commit_str.error()));
+                            fmt::format("Regex for getting commit failed, "
+                                        "possible error: '{}'",
+                                        common_ctx.re_commit_str.error()));
                     };
             }
 
@@ -369,12 +430,12 @@ namespace
                   temp_file_path);
         std::string_view src_uri_str;
 
-        if (not RE2::PartialMatch(str_file_res.value(), re_src_uri,
+        if (not RE2::PartialMatch(str_file_res.value(), common_ctx.re_src_uri,
                                   &src_uri_str))
             {
                 co_return std::unexpected(fmt::format(
                     "Regex for getting first URL from SRC_URI failed: {}",
-                    re_src_uri.error()));
+                    common_ctx.re_src_uri.error()));
             }
 
         // understand what service is this
@@ -383,7 +444,7 @@ namespace
         std::vector<int> indeces_matched;
         indeces_matched.reserve(std::size(ServicesNames));
 
-        re_set_services.Match(src_uri_str, &indeces_matched);
+        common_ctx.re_set_services.Match(src_uri_str, &indeces_matched);
 
         if (indeces_matched.empty())
             {
@@ -399,7 +460,7 @@ namespace
         LOG_DEBUG("Matched these: {}", magic_enum::enum_name(service_id));
 
         {
-                // what is url of a feed for the service and the package?
+            // what is url of a feed for the service and the package?
             // get feed, limit via semaphores
             // write a concept, that has corral::Task<std::expected<std::string,
             // ...>> get_new_version(common_data, data, semaphores, ioc), write
@@ -413,29 +474,11 @@ namespace
         co_return 1;
     }
 
-
-
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
                                                        Config const& cfg,
                                                        auto& semaphores)
     {
         // to compile them all at once
-        RE2 re_commit_str(
-            R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
-            RE2::Quiet);
-        RE2 re_src_uri(
-            R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*))delimiter",
-            RE2::Quiet);
-        RE2 re_category(R"(([\w][\w+.-]*))", RE2::Quiet);
-        RE2 re_pkg_9999(R"([\w+.-]*9999)", RE2::Quiet);
-        RE2 re_pkg_with_date(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet);
-        RE2::Set re_set_services(RE2::DefaultOptions, RE2::Anchor::UNANCHORED);
-        for (auto&& service : ServicesNames)
-            {
-                re_set_services.Add(service, nullptr);
-            }
-        re_set_services.Compile();
-
         // NOLINTBEGIN(hicpp-signed-bitwise)
         std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
             R"([\w][\w+-]*?-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
@@ -445,7 +488,32 @@ namespace
         const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
             str_re_versions);
 
-        reflex::PCRE2UTFMatcher re_version_matcher(pattern_re_versions);
+        CommonContext common_ctx{
+            .re_commit_str = RE2(
+                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
+                RE2::Quiet),
+            .re_src_uri = RE2(
+                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
+                RE2::Quiet),
+
+            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
+            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
+
+            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
+            .re_set_services = std::invoke(
+                []()
+                    {
+                        RE2::Set re_set_services(RE2::DefaultOptions,
+                                                 RE2::Anchor::UNANCHORED);
+                        for (auto&& service : ServicesNames)
+                            {
+                                re_set_services.Add(service, nullptr);
+                            }
+                        re_set_services.Compile();
+                        return re_set_services;
+                    }),
+            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
+        };
 
         std::vector<int> bash_res;
         bool is_any_successful = false;
@@ -462,7 +530,8 @@ namespace
                         }
                     std::string category_str
                         = category.path().filename().string();
-                    if (not RE2::FullMatch(category_str, re_category))
+                    if (not RE2::FullMatch(category_str,
+                                           common_ctx.re_category))
                         {
                             continue;
                         }
@@ -494,80 +563,20 @@ namespace
                                     std::string pkg_p
                                         = pkg_filename.stem().string();
 
-                                    if (RE2::FullMatch(pkg_p, re_pkg_9999))
+                                    if (RE2::FullMatch(pkg_p,
+                                                       common_ctx.re_pkg_9999))
                                         {
                                             continue;
                                         }
-
-                                    auto pkg_type = PackageType::Unknown;
-
-                                    uint64_t date = 0;
-
-                                    if (RE2::FullMatch(pkg_p, re_pkg_with_date,
-                                                       &date))
-                                        {
-                                            pkg_type = PackageType::Commit;
-                                            LOG_INFO(
-                                                "This is a package per "
-                                                "commit: "
-                                                "{} . Its date: {}",
-                                                pkg_p, date);
-                                        }
-                                    else
-                                        {
-                                            pkg_type
-                                                = PackageType::ReleaseOrTag;
-                                            LOG_INFO(
-                                                "This is a package per "
-                                                "release: {}",
-                                                pkg_p);
-                                        }
-                                    re_version_matcher.input(pkg_p);
-
-                                    if (not re_version_matcher.find())
-                                        {
-                                            continue;
-                                        }
-
-                                    size_t match_id = 0;
-                                    while (re_version_matcher[match_id].first
-                                           != nullptr)
-                                        {
-                                            LOG_DEBUG(
-                                                "sth: {}",
-                                                std::string_view{
-                                                    re_version_matcher[match_id]
-                                                        .first,
-                                                    re_version_matcher[match_id]
-                                                        .second});
-                                            if (re_version_matcher[match_id]
-                                                    .first
-                                                == nullptr)
-                                                {
-                                                    LOG_DEBUG("It is nullptr.");
-                                                }
-                                            ++match_id;
-                                        }
-
-                                    auto pv = std::string_view{
-                                        re_version_matcher[1].first,
-                                        re_version_matcher[1].second};
-
                                     nursery.start(
-                                        [&](PackageType pkg_type_arg,
-                                            std::filesystem::path file_arg,
-                                            uint64_t date_arg,
-                                            std::string pv_arg) mutable
+                                        [&](std::filesystem::directory_entry
+                                                file_arg) mutable
                                             -> corral::Task<void>
                                             {
                                                 auto sth
                                                     = co_await logic_per_ebuild(
-                                                        ioc, cfg, pkg_type_arg,
-                                                        file_arg, semaphores,
-                                                        re_commit_str,
-                                                        re_src_uri,
-                                                        re_set_services,
-                                                        date_arg, pv_arg);
+                                                        ioc, cfg, file_arg,
+                                                        semaphores, common_ctx);
                                                 if (!sth)
                                                     {
                                                         is_any_failed = true;
@@ -583,7 +592,7 @@ namespace
                                                     sth.value());
                                                 is_any_successful = true;
                                             },
-                                        pkg_type, file, date, std::string(pv));
+                                        file);
                                 }
                         }
                 }
