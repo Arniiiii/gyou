@@ -182,7 +182,7 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
     request.prepare_payload();
     std::stringstream strs;
     strs << request;
-    LOG_TRACE_L1("Request:\n{}", strs.str());
+    LOG_TRACE_L2("Request:\n{}", strs.str());
     boost::beast::get_lowest_layer(stream).expires_after(MAX_PROMPT_TIME);
 
     LOG_INFO("Sending request to an LLM...");

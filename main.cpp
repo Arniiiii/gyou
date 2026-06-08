@@ -1,15 +1,9 @@
-#include <boost/asio/error.hpp>
-#include <boost/system/detail/error_code.hpp>
-
-#include "overwrite_log_macros.h"
-#include "quill_static.h"
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
 #include <array>
+#include <expected>
 #include <filesystem>
-#include <iostream>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -17,9 +11,12 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/basic_stream_file.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/file_base.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/read.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/stream_file.hpp>
 #include <boost/beast.hpp>
@@ -32,12 +29,13 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/date_time.hpp>
 #include <boost/process.hpp>
-#include <boost/process/v2/shell.hpp>
+#include <boost/process/v2/environment.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ptree_fwd.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <boost/stacktrace.hpp>
+#include <boost/system/detail/error_code.hpp>
 #include <boost/url.hpp>
 #include <corral/Nursery.h>
 #include <corral/Semaphore.h>
@@ -46,7 +44,6 @@
 #include <corral/detail/asio.h>
 #include <corral/run.h>
 #include <corral/wait.h>
-#include <experimental/array>
 #include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/os.h>
@@ -58,19 +55,19 @@
 #include <inja/inja.hpp>
 #include <inja/json.hpp>
 #include <magic_enum/magic_enum.hpp>
-#include <quill/Backend.h>
-#include <quill/Frontend.h>
-#include <quill/Logger.h>
 #include <quill/core/LogLevel.h>
-#include <quill/sinks/ConsoleSink.h>
-#include <quill/sinks/FileSink.h>
+#include <quill/std/FilesystemPath.h>
+#include <quill/std/Vector.h>
 #include <re2/re2.h>
+#include <re2/set.h>
+#include <reflex/pcre2matcher.h>
 
 #include "gyou/array_utils.hpp"
 #include "gyou/boost_stacktrace_format.hpp"
 #include "gyou/http_requests.hpp"
 #include "gyou/omega_exception.hpp"
-
+#include "overwrite_log_macros.h"
+#include "quill_static.h"
 // it is for getting real type from compiler when debugging via
 // `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
 template <typename T> struct Debug;
@@ -78,7 +75,7 @@ template <typename T> struct Debug;
 constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
 
 // NOLINTNEXTLINE(performance-enum-size)
-enum class Services : size_t
+enum class Service : size_t
 {
     github = 0,
     gitlab = 1,
@@ -116,33 +113,33 @@ constexpr auto ServicesNames = std::invoke(
         {
             constexpr auto not_a_map_because_of_fucking_cpp = std::to_array({
                 // clang-format off
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::bitbucket),"https://bitbucket.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::codeberg),"https://codeberg.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpan),"https://metacpan.org/dist/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpan_module),"https://metacpan.org/pod/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cpe),"cpe:/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::cran),"https://cran.r-project.org/web/packages/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::ctan),"https://ctan.org/pkg/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::freedesktop_gitlab),"https://gitlab.freedesktop.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gentoo),"https://gitweb.gentoo.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::github),"https://github.com/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gitlab),"https://gitlab.com/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::gnome_gitlab),"https://gitlab.gnome.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::google_code),"https://code.google.com/archive/p/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::hackage),"https://hackage.haskell.org/package/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::heptapod),"https://foss.heptapod.net/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::kde_invent),"https://invent.kde.org/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::launchpad),"https://launchpad.net/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::osdn),"https://osdn.net/projects/.*/"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pear),"https://pear.php.net/package/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pecl),"https://pecl.php.net/package/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::pypi),"https://pypi.org/project/.*/"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::rubygems),"https://rubygems.org/gems/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::savannah),"https://savannah.gnu.org/projects/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::savannah_nongnu),"https://savannah.nongnu.org/projects/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::sourceforge),"https://sourceforge.net/projects/.*/"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::sourcehut),"https://sr.ht/.*"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Services::vim),"https://www.vim.org/scripts/script.php?script_id=.*")
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::bitbucket),"https://bitbucket.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::codeberg),"https://codeberg.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpan),"https://metacpan.org/dist/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpan_module),"https://metacpan.org/pod/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpe),"cpe:/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cran),"https://cran.r-project.org/web/packages/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::ctan),"https://ctan.org/pkg/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::freedesktop_gitlab),"https://gitlab.freedesktop.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gentoo),"https://gitweb.gentoo.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::github),"https://github.com/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gitlab),"https://gitlab.com/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gnome_gitlab),"https://gitlab.gnome.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::google_code),"https://code.google.com/archive/p/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::hackage),"https://hackage.haskell.org/package/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::heptapod),"https://foss.heptapod.net/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::kde_invent),"https://invent.kde.org/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::launchpad),"https://launchpad.net/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::osdn),"https://osdn.net/projects/.*?/"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pear),"https://pear.php.net/package/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pecl),"https://pecl.php.net/package/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pypi),"https://pypi.org/project/.*?/"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::rubygems),"https://rubygems.org/gems/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::savannah),"https://savannah.gnu.org/projects/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::savannah_nongnu),"https://savannah.nongnu.org/projects/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourceforge),"https://sourceforge.net/projects/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourcehut),"https://sr.ht/.*?"),
+    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::vim),"https://www.vim.org/scripts/script.php?script_id=.*?")
                 // clang-format on
             });
 
@@ -150,10 +147,9 @@ constexpr auto ServicesNames = std::invoke(
                        std::size(not_a_map_because_of_fucking_cpp)>
                 arr;
 
-            for (size_t i = 0; i < std::size(not_a_map_because_of_fucking_cpp);
-                 ++i)
+            for (const auto& [pos, val] : not_a_map_because_of_fucking_cpp)
                 {
-                    arr.at(i) = not_a_map_because_of_fucking_cpp.at(i).second;
+                    arr.at(pos) = val;
                 }
 
             return arr;
@@ -232,7 +228,7 @@ namespace
         str_of_file.reserve(file_reader.size());
 
         auto&& [errc, bytes_read] = co_await boost::asio::async_read(
-            file_reader, boost::asio::buffer(str_of_file),
+            file_reader, boost::asio::dynamic_buffer(str_of_file),
             corral::asio_nothrow_awaitable);
         if (errc && boost::asio::error::eof != errc)
             {
@@ -244,13 +240,25 @@ namespace
     [[nodiscard]] corral::Task<
         std::expected<std::filesystem::path, std::string>>
     bash_ebuild(auto& ioc, Config const& cfg,
-                std::filesystem::path const& path_to_ebuild)
+                std::filesystem::path const& path_to_ebuild,
+                std::string_view pv)
     {
-        std::string pkg_name = path_to_ebuild.filename().stem().string();
-        std::string category = path_to_ebuild.parent_path().filename().string();
+        std::string pkg_full_name = path_to_ebuild.filename().stem().string();
+        std::string pkg_name = path_to_ebuild.parent_path().filename().string();
+        std::string category
+            = path_to_ebuild.parent_path().parent_path().filename().string();
 
         std::filesystem::path temp_folder
-            = (cfg.path_to_portage_temp / category / pkg_name).concat("/");
+            = (cfg.path_to_portage_temp / category / pkg_full_name).concat("/");
+
+        std::error_code errc_mkdir_p;
+        std::filesystem::create_directories(temp_folder, errc_mkdir_p);
+        if (errc_mkdir_p)
+            {
+                co_return std::unexpected(
+                    fmt::format("Failed to create temp directory for a ebuild.",
+                                errc_mkdir_p.message()));
+            };
 
         std::unordered_map<boost::process::environment::key,
                            boost::process::environment::value>
@@ -264,64 +272,42 @@ namespace
                      + cfg.path_to_repo.string()},
                 {"EBUILD_PHASE", "_internal_test"},
                 {"CATEGORY", category},
-                {"PF", pkg_name},
+                {"PF", pkg_full_name},
+                {"PN", pkg_name},
+                {"PV", pv},
             };
 
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
-        std::string shell_args
-            = (cfg.path_to_portage_bin / "ebuild.sh").string()
-              + " _internal_test " + path_to_ebuild.string();
-
-        boost::process::shell cmd_get_subtitles
-            = boost::process::shell(shell_args);
-
-        auto exe = cmd_get_subtitles.exe();
         auto proc = boost::process::process(
-            ioc, exe, cmd_get_subtitles.args(),
+            ioc, (cfg.path_to_portage_bin / "ebuild.sh").string(),
+            {"_internal_test", path_to_ebuild.string()},
             boost::process::process_stdio{.in = {/* in to default */},
                                           .out = rp_stdout,
-                                          .err = rp_stderr});
+                                          .err = rp_stderr},
+            boost::process::process_environment{env_for_ebuild});
 
-        auto read_loop = [](boost::asio::readable_pipe& p) -> corral::Task<std::string>
-            {
-                std::string res;
-                std::array<char, 4096> buf;
-                for (;;)
-                    {
-                        auto [error_code, received_size]
-                            = co_await p.async_read_some(
-                                boost::asio::buffer(buf),
-                                corral::asio_nothrow_awaitable);
-                        if (received_size)
-                            {
-                                res.append(buf.data(), received_size);
-                            }
-                        if (error_code)
-                            {
-                                co_return res;
-                            }
-                    }
-            };
+        LOG_DEBUG("Doing sth in bash, probably");
 
-        auto wait_proc = [](boost::process::process& p) -> corral::Task<int>
-            {
-                auto [ec, exit_code]
-                    = co_await p.async_wait(corral::asio_nothrow_awaitable);
-                co_return exit_code;
-            };
+        std::string stdout_s;
+        std::string stderr_s;
 
-        LOG_DEBUG("Doing sth in bash: {}", shell_args);
+        auto [proc_tuple, _, _] = co_await corral::allOf(
+            proc.async_wait(corral::asio_nothrow_awaitable),
+            boost::asio::async_read(rp_stdout,
+                                    boost::asio::dynamic_buffer(stdout_s),
+                                    corral::asio_nothrow_awaitable),
+            boost::asio::async_read(rp_stderr,
+                                    boost::asio::dynamic_buffer(stderr_s),
+                                    corral::asio_nothrow_awaitable));
+        auto&& [_, errc_proc] = proc_tuple;
 
-        auto [errc_proc, stdout_str, stderr_str] = co_await corral::allOf(
-            wait_proc(proc), read_loop(rp_stdout), read_loop(rp_stderr));
-
-        if (not stderr_str.empty() || errc_proc != 0)
+        if (errc_proc != 0)
             {
                 co_return std::unexpected(fmt::format(
-                    "Failed to do yt-dlp: ec: {}\nstderr: {}\nstdout: {}",
-                    errc_proc, stderr_str, stdout_str));
+                    "Failed to do ebuild: ec: {}\nstderr: {}\nstdout: {}",
+                    errc_proc, stderr_s, stdout_s));
             }
 
         co_return temp_folder;
@@ -333,14 +319,16 @@ namespace
     // semaphore
     // check for update
     //  return what to change
-    [[nodiscard]] corral::Task<std::expected<DataFromEbuild, std::string>>
+    [[nodiscard]] corral::Task<std::expected<int, std::string>>
     logic_per_ebuild(auto& ioc, Config const& cfg, PackageType pkg_type,
                      std::filesystem::path const& path_to_ebuild,
                      auto& semaphores, RE2 const& re_commit_str,
-                     RE2 const& re_src_uri, uint64_t date)
+                     RE2 const& re_src_uri, RE2::Set const& re_set_services,
+                     uint64_t date, std::string_view pv)
     {
+        LOG_DEBUG("Doing bash for {}", path_to_ebuild);
         auto temp_folder_path_res
-            = co_await bash_ebuild(ioc, cfg, path_to_ebuild);
+            = co_await bash_ebuild(ioc, cfg, path_to_ebuild, pv);
 
         if (!temp_folder_path_res)
             {
@@ -349,8 +337,10 @@ namespace
                                 temp_folder_path_res.error()));
             }
         std::filesystem::path temp_file_path
-            = (temp_folder_path_res.value() / "temp");
+            = (temp_folder_path_res.value() / "environment");
 
+        LOG_DEBUG("Attempt to read the environment file into memory at {}",
+                  temp_file_path);
         auto str_file_res = co_await file_to_string(ioc, temp_file_path);
         if (not str_file_res)
             {
@@ -358,13 +348,15 @@ namespace
                     fmt::format("Failed to read file. error: {}",
                                 str_file_res.error().message()));
             }
+        LOG_TRACE_L2("env_file: \n{}\n\n", str_file_res.value());
+
         std::string_view commit_env_var_name;
 
         std::string_view commit;
         if (PackageType::Commit == pkg_type)
             {
-                if (not RE2::FullMatch(str_file_res.value(), re_commit_str,
-                                       &commit_env_var_name, &commit))
+                if (not RE2::PartialMatch(str_file_res.value(), re_commit_str,
+                                          &commit_env_var_name, &commit))
                     {
                         co_return std::unexpected(
                             fmt::format("Regex for getting commit failed: {}",
@@ -373,9 +365,12 @@ namespace
             }
 
         // get first url in SRC_URI
+        LOG_DEBUG("Attempt to get first URL from SRC_URI from {}",
+                  temp_file_path);
         std::string_view src_uri_str;
 
-        if (not RE2::FullMatch(str_file_res.value(), re_src_uri, &src_uri_str))
+        if (not RE2::PartialMatch(str_file_res.value(), re_src_uri,
+                                  &src_uri_str))
             {
                 co_return std::unexpected(fmt::format(
                     "Regex for getting first URL from SRC_URI failed: {}",
@@ -383,7 +378,42 @@ namespace
             }
 
         // understand what service is this
+        LOG_DEBUG("Trying to undertand which service is that for {}",
+                  src_uri_str);
+        std::vector<int> indeces_matched;
+        indeces_matched.reserve(std::size(ServicesNames));
+
+        re_set_services.Match(src_uri_str, &indeces_matched);
+
+        if (indeces_matched.empty())
+            {
+                co_return std::unexpected(fmt::format(
+                    "Failed to understand what service is an URI. URI: {}",
+                    src_uri_str));
+            }
+
+        Service service_id = magic_enum::enum_cast<Service>(
+                                 static_cast<size_t>(indeces_matched[0]))
+                                 .value();
+
+        LOG_DEBUG("Matched these: {}", magic_enum::enum_name(service_id));
+
+        {
+                // what is url of a feed for the service and the package?
+            // get feed, limit via semaphores
+            // write a concept, that has corral::Task<std::expected<std::string,
+            // ...>> get_new_version(common_data, data, semaphores, ioc), write
+            // 27 different handlers. auto lock = co_await semaphores
+            //                 .at(static_cast<size_t>(indeces_matched[0]))
+            //                 .lock();
+        }
+
+        // return what has to be changed
+
+        co_return 1;
     }
+
+
 
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
                                                        Config const& cfg,
@@ -394,13 +424,30 @@ namespace
             R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
             RE2::Quiet);
         RE2 re_src_uri(
-            R"delimiter(declare SRC_URI="(https?://\S*)(?: -> \S* ?.*)?"\n)delimiter",
+            R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*))delimiter",
             RE2::Quiet);
         RE2 re_category(R"(([\w][\w+.-]*))", RE2::Quiet);
         RE2 re_pkg_9999(R"([\w+.-]*9999)", RE2::Quiet);
         RE2 re_pkg_with_date(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet);
+        RE2::Set re_set_services(RE2::DefaultOptions, RE2::Anchor::UNANCHORED);
+        for (auto&& service : ServicesNames)
+            {
+                re_set_services.Add(service, nullptr);
+            }
+        re_set_services.Compile();
 
-        std::vector<DataFromEbuild> bash_res;
+        // NOLINTBEGIN(hicpp-signed-bitwise)
+        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
+            R"([\w][\w+-]*?-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
+            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
+        // NOLINTEND(hicpp-signed-bitwise)
+
+        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
+            str_re_versions);
+
+        reflex::PCRE2UTFMatcher re_version_matcher(pattern_re_versions);
+
+        std::vector<int> bash_res;
         bool is_any_successful = false;
         bool is_any_failed = false;
 
@@ -444,10 +491,10 @@ namespace
                                             continue;
                                         }
 
-                                    std::string pkg_pv
+                                    std::string pkg_p
                                         = pkg_filename.stem().string();
 
-                                    if (RE2::FullMatch(pkg_pv, re_pkg_9999))
+                                    if (RE2::FullMatch(pkg_p, re_pkg_9999))
                                         {
                                             continue;
                                         }
@@ -456,7 +503,7 @@ namespace
 
                                     uint64_t date = 0;
 
-                                    if (RE2::FullMatch(pkg_pv, re_pkg_with_date,
+                                    if (RE2::FullMatch(pkg_p, re_pkg_with_date,
                                                        &date))
                                         {
                                             pkg_type = PackageType::Commit;
@@ -464,7 +511,7 @@ namespace
                                                 "This is a package per "
                                                 "commit: "
                                                 "{} . Its date: {}",
-                                                pkg_pv, &date);
+                                                pkg_p, date);
                                         }
                                     else
                                         {
@@ -473,13 +520,44 @@ namespace
                                             LOG_INFO(
                                                 "This is a package per "
                                                 "release: {}",
-                                                pkg_pv);
+                                                pkg_p);
                                         }
+                                    re_version_matcher.input(pkg_p);
+
+                                    if (not re_version_matcher.find())
+                                        {
+                                            continue;
+                                        }
+
+                                    size_t match_id = 0;
+                                    while (re_version_matcher[match_id].first
+                                           != nullptr)
+                                        {
+                                            LOG_DEBUG(
+                                                "sth: {}",
+                                                std::string_view{
+                                                    re_version_matcher[match_id]
+                                                        .first,
+                                                    re_version_matcher[match_id]
+                                                        .second});
+                                            if (re_version_matcher[match_id]
+                                                    .first
+                                                == nullptr)
+                                                {
+                                                    LOG_DEBUG("It is nullptr.");
+                                                }
+                                            ++match_id;
+                                        }
+
+                                    auto pv = std::string_view{
+                                        re_version_matcher[1].first,
+                                        re_version_matcher[1].second};
 
                                     nursery.start(
                                         [&](PackageType pkg_type_arg,
-                                            std::filesystem::path
-                                                file_arg) mutable
+                                            std::filesystem::path file_arg,
+                                            uint64_t date_arg,
+                                            std::string pv_arg) mutable
                                             -> corral::Task<void>
                                             {
                                                 auto sth
@@ -487,7 +565,9 @@ namespace
                                                         ioc, cfg, pkg_type_arg,
                                                         file_arg, semaphores,
                                                         re_commit_str,
-                                                        re_src_uri, date);
+                                                        re_src_uri,
+                                                        re_set_services,
+                                                        date_arg, pv_arg);
                                                 if (!sth)
                                                     {
                                                         is_any_failed = true;
@@ -503,7 +583,7 @@ namespace
                                                     sth.value());
                                                 is_any_successful = true;
                                             },
-                                        pkg_type, file);
+                                        pkg_type, file, date, std::string(pv));
                                 }
                         }
                 }
@@ -534,31 +614,31 @@ namespace
             }
     }
 
-    boost::property_tree::ptree parse_rss_into_tree(std::string const& rss_feed)
-    {
-        // LOG_DEBUG("Waiting for YouTube's RSS feed from stdin...");
-        // std::cin >> std::noskipws;
-        // std::istreambuf_iterator<char> start(std::cin);
-        // std::istreambuf_iterator<char> end;
-        // std::string xml_rss_youtube_feed(start, end);
-        // LOG_DEBUG("Received the YouTube's RSS feed.");
-        //
-        // boost::property_tree::ptree tree
-        //     = parse_rss_into_tree(xml_rss_youtube_feed);
-        LOG_DEBUG("Received something from stdin...");
-        LOG_TRACE_L1("rss_feed: {}", rss_feed);
-        boost::property_tree::ptree tree;
-        std::istringstream istr(rss_feed);
-        LOG_DEBUG("Trying to parse it as an XML...");
-        boost::property_tree::read_xml(istr, tree);
-        LOG_DEBUG("Successfully parsed an XML...");
-        return tree;
-    }
+    // boost::property_tree::ptree parse_rss_into_tree(std::string const&
+    // rss_feed)
+    // {
+    //     // LOG_DEBUG("Waiting for YouTube's RSS feed from stdin...");
+    //     // std::cin >> std::noskipws;
+    //     // std::istreambuf_iterator<char> start(std::cin);
+    //     // std::istreambuf_iterator<char> end;
+    //     // std::string xml_rss_youtube_feed(start, end);
+    //     // LOG_DEBUG("Received the YouTube's RSS feed.");
+    //     //
+    //     // boost::property_tree::ptree tree
+    //     //     = parse_rss_into_tree(xml_rss_youtube_feed);
+    //     LOG_DEBUG("Received something from stdin...");
+    //     LOG_TRACE_L1("rss_feed: {}", rss_feed);
+    //     boost::property_tree::ptree tree;
+    //     std::istringstream istr(rss_feed);
+    //     LOG_DEBUG("Trying to parse it as an XML...");
+    //     boost::property_tree::read_xml(istr, tree);
+    //     LOG_DEBUG("Successfully parsed an XML...");
+    //     return tree;
+    // }
 
     corral::Task<ReturnCode> actual_chief(auto& ioc, Config const& cfg)
     {
-        constexpr size_t amount_of_services
-            = magic_enum::enum_count<Services>();
+        constexpr size_t amount_of_services = magic_enum::enum_count<Service>();
 
         std::array<corral::Semaphore, amount_of_services>
             semaphores_per_services

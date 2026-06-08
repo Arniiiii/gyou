@@ -11,7 +11,7 @@ class CompressorRecipe(ConanFile):
 
     def requirements(self):
         self.requires("corral/[~0]")
-        # self.requires("openssl/[~3]")
+        self.requires("openssl/[~3]")
         self.requires("boost/[>=1.88.0 <1.90.0]")
         # self.requires("gtest/[~1]")
         self.requires("fmt/[~12]")
@@ -20,9 +20,10 @@ class CompressorRecipe(ConanFile):
         self.requires("inja/[~3]")
         self.requires("quill/[~11]")
         self.requires("glaze/[~7]")
-        self.requires("openssl/[~3]")
         self.requires("re2/20251105") 
         self.requires("liburing/[~2]")
+        self.requires("reflex/[~6]")
+        self.requires("pcre2/[~10]")
 
     def build_requirements(self):
         self.tool_requires("cmake/3.27.9")
