@@ -1,3 +1,4 @@
+#include <optional>
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
@@ -487,19 +488,72 @@ namespace
     // check if we support the service
     // semaphore
     // check for update
-    [[nodiscard]] corral::Task<std::expected<int, std::string>> get_latest_info(
-        auto& ioc, Config const& cfg, auto& semaphores,
-        CommonContext& common_ctx, EbuildSpecificData& ebuild_data)
+    [[nodiscard]] corral::Task<std::expected<
+        std::optional<std::variant<CommitSpecific, std::string>>, std::string>>
+    get_latest_info(auto& ioc, Config const& cfg, auto& semaphores,
+                    CommonContext& common_ctx, EbuildSpecificData& ebuild_data)
     {
         // what is url of a feed for the service and the package?
+
+        std::string new_version;
+        std::string new_commit;
+        uint64_t new_date = 0;
+
         // get feed, limit via semaphores
         // write a concept, that has corral::Task<std::expected<std::string,
         // ...>> get_new_version(common_data, data, semaphores, ioc), write
         // 27 different handlers. auto lock = co_await semaphores
         //                 .at(static_cast<size_t>(indeces_matched[0]))
         //                 .lock();
+        switch (ebuild_data.service)
+            {
+                case Service::github:
+                case Service::gitlab:
+                case Service::bitbucket:
+                case Service::codeberg:
+                case Service::cpan:
+                case Service::cpan_module:
+                case Service::cpe:
+                case Service::cran:
+                case Service::ctan:
+                case Service::freedesktop_gitlab:
+                case Service::gentoo:
+                case Service::gnome_gitlab:
+                case Service::google_code:
+                case Service::hackage:
+                case Service::heptapod:
+                case Service::kde_invent:
+                case Service::launchpad:
+                case Service::osdn:
+                case Service::pear:
+                case Service::pecl:
+                case Service::pypi:
+                case Service::rubygems:
+                case Service::savannah:
+                case Service::savannah_nongnu:
+                case Service::sourceforge:
+                case Service::sourcehut:
+                case Service::vim:
+                    break;
+            };
 
-        co_return 0;
+        if (ebuild_data.commit_specific.has_value())
+            {
+                if (not new_commit.empty() && not(0 == new_date))
+                    {
+                        co_return CommitSpecific{.date = new_date,
+                                                 .commit = new_commit};
+                    }
+            }
+        else
+            {
+                if (not new_version.empty())
+                    {
+                        co_return new_version;
+                    }
+            }
+        LOG_INFO("no update for package {}", ebuild_data.p);
+        co_return std::nullopt;
     }
 
     //  return what to change
@@ -515,10 +569,15 @@ namespace
                 co_return std::unexpected(ebuild_data_res.error());
             }
 
-        auto sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
-                                            ebuild_data_res.value());
+        std::expected<std::optional<std::variant<CommitSpecific, std::string>>,
+                      std::string>
+            sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
+                                           ebuild_data_res.value());
 
-
+        if (!sth)
+            {
+                co_return std::unexpected(sth.error());
+            }
 
         // return what has to be changed
 
