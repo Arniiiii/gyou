@@ -226,7 +226,7 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
 }
 
 corral::Task<std::expected<std::string, std::string>> request_internet(
-    auto& ioc, std::string& request_body, boost::urls::url const& url,
+    auto& ioc, std::string const& request_body, boost::urls::url const& url,
     boost::beast::http::verb method,
     boost::beast::http::header<true> const& headers)
 {

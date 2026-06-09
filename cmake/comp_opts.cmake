@@ -3,6 +3,7 @@ macro(set_common_compile_options target_name)
     target_compile_options(${target_name}
                        PUBLIC "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->")
 
+    set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 26)
 
     if(${${PROJECT_NAME}_ENABLE_WARNINGS})
         include(${CMAKE_CURRENT_LIST_DIR}/cmake/warnings.cmake)

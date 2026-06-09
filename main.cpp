@@ -1,4 +1,7 @@
+#include <chrono>
 #include <optional>
+#include <sstream>
+#include <variant>
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
@@ -57,6 +60,7 @@
 #include <inja/json.hpp>
 #include <magic_enum/magic_enum.hpp>
 #include <quill/core/LogLevel.h>
+#include <quill/std/Chrono.h>
 #include <quill/std/FilesystemPath.h>
 #include <quill/std/Vector.h>
 #include <re2/re2.h>
@@ -72,6 +76,11 @@
 // it is for getting real type from compiler when debugging via
 // `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
 template <typename T> struct Debug;
+
+template <class... Ts> struct overloads : Ts...
+{
+    using Ts::operator()...;
+};
 
 constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
 
@@ -232,6 +241,13 @@ struct EbuildSpecificData
 
 namespace
 {
+    boost::property_tree::ptree parse_rss_into_tree(std::string const& rss_feed)
+    {
+        boost::property_tree::ptree tree;
+        std::istringstream istr(rss_feed);
+        boost::property_tree::read_xml(istr, tree);
+        return tree;
+    }
 
     [[nodiscard]] corral::Task<
         std::expected<std::string, boost::system::error_code>>
@@ -257,7 +273,7 @@ namespace
         std::expected<std::filesystem::path, std::string>>
     bash_ebuild(auto& ioc, Config const& cfg,
                 std::filesystem::path const& path_to_ebuild,
-                std::string_view pv)
+                std::string_view const pv)
     {
         std::string pkg_full_name = path_to_ebuild.filename().stem().string();
         std::string pkg_name = path_to_ebuild.parent_path().filename().string();
@@ -385,10 +401,11 @@ namespace
                 ++match_id;
             }
 
-        auto pn = std::string_view{common_ctx.re_version_matcher[1].first,
-                                   common_ctx.re_version_matcher[1].second};
-        auto pv = std::string_view{common_ctx.re_version_matcher[2].first,
-                                   common_ctx.re_version_matcher[2].second};
+        auto pn = std::string{common_ctx.re_version_matcher[1].first,
+                              common_ctx.re_version_matcher[1].second};
+        auto pv = std::string{common_ctx.re_version_matcher[2].first,
+                              common_ctx.re_version_matcher[2].second};
+        LOG_DEBUG("PN: '{}' PV: '{}'", pn, pv);
         LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
         auto temp_folder_path_res
             = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pv);
@@ -466,8 +483,8 @@ namespace
         co_return EbuildSpecificData{
             .filepath = path_to_ebuild,
             .p = pkg_p,
-            .pv = std::string(pv),
-            .pn = std::string(pn),
+            .pv = pv,
+            .pn = pn,
             .category = category_str,
             .first_uri = std::string(src_uri_str),
             .commit_specific = std::invoke(
@@ -485,29 +502,224 @@ namespace
             .service = service_id};
     }
 
+    [[nodiscard]] corral::Task<
+        std::expected<std::variant<CommitSpecific, std::string>, std::string>>
+    github_fetch_version(auto& ioc, auto& semaphores,
+                         EbuildSpecificData const& ebuild_data)
+    {
+        std::string new_version{};
+        std::string new_commit{};
+        uint64_t new_date = 0;
+
+        boost::urls::url src_uri(ebuild_data.first_uri);
+
+        std::string workspace;
+        std::string repo;
+
+        bool is_tag = false;
+        for (int i = 0; auto const& seg : src_uri.encoded_segments())
+            {
+                switch (i)
+                    {
+                        case 0:
+                            {
+                                workspace = seg;
+                                break;
+                            }
+                        case 1:
+                            {
+                                repo = seg;
+                                break;
+                            }
+                        case 3:
+                            {
+                                if ("refs" == seg)
+                                    {
+                                        is_tag = true;
+                                        goto end_loop;
+                                    }
+                                break;
+                            }
+                        default:
+                            break;
+                    };
+                ++i;
+            }
+    end_loop:
+        std::string feed_url = "https://github.com/" + workspace + "/" + repo;
+        if (is_tag)
+            {
+                feed_url += "/tags.atom";
+            }
+        else if (ebuild_data.commit_specific.has_value())
+            {
+                feed_url += "/commits.atom";
+            }
+        else
+            {
+                feed_url += "/releases.atom";
+            }
+
+        LOG_INFO("Presumable URL for feed: {}", feed_url);
+
+        std::string request_str;
+        {
+            auto lock = co_await semaphores
+                            .at(std::to_underlying(ebuild_data.service))
+                            .lock();
+            auto req_res
+                = co_await request_internet(ioc, "", boost::urls::url(feed_url),
+                                            boost::beast::http::verb::get,
+                                            boost::beast::http::header<true>{});
+
+            if (not req_res)
+                {
+                    co_return std::unexpected(req_res.error());
+                }
+
+            request_str = std::move(req_res.value());
+        }
+        LOG_TRACE_L3("response: {}", request_str);
+        LOG_INFO("Received feed. {}", feed_url);
+        boost::property_tree::ptree tree;
+        try
+            {
+                tree = parse_rss_into_tree(request_str);
+            }
+        catch (boost::property_tree::xml_parser_error& e)
+            {
+                co_return std::unexpected(
+                    fmt::format("Failed to parse feed: {}", e.what()));
+            }
+        std::string commit_version_or_tag;
+
+        for (auto& xml_entry : tree.get_child("feed"))
+            {
+                if ("entry" != xml_entry.first)
+                    {
+                        continue;
+                    }
+
+                auto const& link_entry
+                    = xml_entry.second.get_child("link.<xmlattr>.href");
+                boost::urls::url parsed_link{link_entry.data()};
+                LOG_DEBUG("Fetched url from: {}", parsed_link.c_str());
+                for (int i = 0;
+                     auto const& seg : parsed_link.encoded_segments())
+                    {
+                        LOG_TRACE_L1("{} seg: {}", i, std::string_view{seg});
+                        if (3 == i && ebuild_data.commit_specific.has_value())
+                            {
+                                commit_version_or_tag = seg;
+                            }
+                        if (4 == i)
+                            {
+                                commit_version_or_tag = seg;
+                            }
+                        ++i;
+                    }
+                LOG_TRACE_L1(
+                    "is_tag: {}, is it commit type: {} commit_version_or_tag: "
+                    "{}",
+                    is_tag, ebuild_data.commit_specific.has_value(),
+                    commit_version_or_tag);
+                if (is_tag or not ebuild_data.commit_specific.has_value())
+                    {
+                        new_version = std::move(commit_version_or_tag);
+                    }
+                else
+                    {
+                        new_commit = std::move(commit_version_or_tag);
+                    }
+                if (ebuild_data.commit_specific.has_value())
+                    {
+                        std::string date_str
+                            = xml_entry.second.get_child("updated").data();
+
+                        std::chrono::sys_time<std::chrono::seconds>
+                            time_from_epoch{};
+
+                        std::istringstream is{date_str};
+
+                        if (is_tag or ebuild_data.commit_specific.has_value())
+                            {
+                                is >> std::chrono::parse("%Y-%m-%dT%H:%M:%SZ",
+                                                         time_from_epoch);
+                            }
+                        else
+                            {
+                                is >> std::chrono::parse("%Y-%m-%dT%H:%M:%S%Ez",
+                                                         time_from_epoch);
+                            }
+
+                        LOG_TRACE_L1("Seconds: {}", time_from_epoch);
+                        auto days = std::chrono::sys_days{
+                            std::chrono::floor<std::chrono::days>(
+                                time_from_epoch)};
+                        LOG_TRACE_L1("Days: {}",
+                                     days.time_since_epoch().count());
+                        std::chrono::year_month_day ymd{days};
+                        LOG_TRACE_L1("ymd: y: {} m: {} d: {}",
+                                     static_cast<int>(ymd.year()),
+                                     static_cast<unsigned>(ymd.month()),
+                                     static_cast<unsigned>(ymd.day()));
+
+                        new_date = static_cast<uint64_t>(
+                            static_cast<uint64_t>(
+                                (static_cast<int>(ymd.year()) * 10000))
+                            + (static_cast<uint64_t>(
+                                   static_cast<unsigned>(ymd.month()))
+                               * 100)
+                            + static_cast<unsigned>(ymd.day()));
+                    }
+                // do it only once to get info only for latest entry.
+                break;
+            }
+        if (ebuild_data.commit_specific.has_value())
+            {
+                LOG_INFO("Fetched date: {} commit: {}", new_date, new_commit);
+                co_return CommitSpecific{.date = new_date,
+                                         .commit = new_commit};
+            }
+        LOG_INFO("Fetched version '{}'", new_version);
+        if (new_version.starts_with("v"))
+            {
+                new_version = new_version.substr(1);
+            }
+        co_return new_version;
+    }
+
     // check if we support the service
     // semaphore
     // check for update
-    [[nodiscard]] corral::Task<std::expected<
-        std::optional<std::variant<CommitSpecific, std::string>>, std::string>>
+    [[nodiscard]] corral::Task<
+        std::expected<std::variant<CommitSpecific, std::string>, std::string>>
     get_latest_info(auto& ioc, Config const& cfg, auto& semaphores,
                     CommonContext& common_ctx, EbuildSpecificData& ebuild_data)
     {
-        // what is url of a feed for the service and the package?
-
-        std::string new_version;
-        std::string new_commit;
-        uint64_t new_date = 0;
-
-        // get feed, limit via semaphores
-        // write a concept, that has corral::Task<std::expected<std::string,
+        // what is url of a feed for the service and the package? is it per tag,
+        // per commit or per release? get feed, limit via semaphores write a
+        // concept, that has corral::Task<std::expected<std::string,
         // ...>> get_new_version(common_data, data, semaphores, ioc), write
         // 27 different handlers. auto lock = co_await semaphores
         //                 .at(static_cast<size_t>(indeces_matched[0]))
         //                 .lock();
+
+        std::variant<CommitSpecific, std::string> fetched{};
+
         switch (ebuild_data.service)
             {
                 case Service::github:
+                    {
+                        auto fetched_res = co_await github_fetch_version(
+                            ioc, semaphores, ebuild_data);
+                        if (not fetched_res)
+                            {
+                                co_return std::unexpected(fetched_res.error());
+                            }
+                        fetched = std::move(fetched_res.value());
+                        break;
+                    }
                 case Service::gitlab:
                 case Service::bitbucket:
                 case Service::codeberg:
@@ -534,26 +746,18 @@ namespace
                 case Service::sourceforge:
                 case Service::sourcehut:
                 case Service::vim:
+                    co_return std::unexpected(fmt::format(
+                        "This service is not yet supported: {}",
+                        magic_enum::enum_name(ebuild_data.service)));
                     break;
             };
 
-        if (ebuild_data.commit_specific.has_value())
-            {
-                if (not new_commit.empty() && not(0 == new_date))
-                    {
-                        co_return CommitSpecific{.date = new_date,
-                                                 .commit = new_commit};
-                    }
-            }
-        else
-            {
-                if (not new_version.empty())
-                    {
-                        co_return new_version;
-                    }
-            }
-        LOG_INFO("no update for package {}", ebuild_data.p);
-        co_return std::nullopt;
+        fetched.visit(overloads{
+            [&](CommitSpecific const& fetched) mutable
+                { LOG_DEBUG("Fetched: {} {}", fetched.date, fetched.commit); },
+            [&](std::string const& fetched)
+                { LOG_DEBUG("Fetched: {}", fetched); }});
+        co_return fetched;
     }
 
     //  return what to change
@@ -562,21 +766,83 @@ namespace
                      std::filesystem::directory_entry const& path_to_ebuild,
                      auto& semaphores, CommonContext& common_ctx)
     {
-        std::expected<EbuildSpecificData, std::string> ebuild_data_res
-            = co_await get_ebuild_info(ioc, cfg, common_ctx, path_to_ebuild);
-        if (not ebuild_data_res)
+        EbuildSpecificData ebuild_data;
+        {
+            std::expected<EbuildSpecificData, std::string> ebuild_data_res
+                = co_await get_ebuild_info(ioc, cfg, common_ctx,
+                                           path_to_ebuild);
+            if (not ebuild_data_res)
+                {
+                    co_return std::unexpected(ebuild_data_res.error());
+                }
+            ebuild_data = std::move(ebuild_data_res.value());
+        }
+
+        LOG_DEBUG("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
+                  ebuild_data.first_uri,
+                  magic_enum::enum_name(ebuild_data.service),
+                  ebuild_data.filepath, ebuild_data.p, ebuild_data.pn,
+                  ebuild_data.pv);
+
+        if (ebuild_data.commit_specific.has_value())
             {
-                co_return std::unexpected(ebuild_data_res.error());
+                LOG_DEBUG("Current date: '{}' commit: '{}'",
+                          ebuild_data.commit_specific.value().date,
+                          ebuild_data.commit_specific.value().commit);
             }
 
-        std::expected<std::optional<std::variant<CommitSpecific, std::string>>,
-                      std::string>
-            sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
-                                           ebuild_data_res.value());
+        std::variant<CommitSpecific, std::string> fetched_ver;
+        {
+            std::expected<std::variant<CommitSpecific, std::string>,
+                          std::string>
+                sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
+                                               ebuild_data);
 
-        if (!sth)
+            if (!sth)
+                {
+                    co_return std::unexpected(sth.error());
+                }
+            fetched_ver = std::move(sth.value());
+        }
+
+        LOG_DEBUG("Current ver: {}", ebuild_data.pv);
+
+        if (ebuild_data.commit_specific.has_value())
             {
-                co_return std::unexpected(sth.error());
+                LOG_INFO("Current date: {} commit: {}",
+                         ebuild_data.commit_specific.value().date,
+                         ebuild_data.commit_specific.value().commit);
+            }
+
+        fetched_ver.visit(overloads{
+            [&](CommitSpecific const& fetched) mutable
+                {
+                    LOG_INFO("Fetched: '{}' '{}' '{}'", ebuild_data.p,
+                             fetched.date, fetched.commit);
+                },
+            [&](std::string const& fetched)
+                { LOG_INFO("Fetched: '{}' '{}'", ebuild_data.p, fetched); }});
+
+        bool is_changed = false;
+        fetched_ver.visit(overloads{
+            [&](CommitSpecific const& fetched) mutable
+                {
+                    if (ebuild_data.commit_specific.value().date < fetched.date)
+                        {
+                            is_changed = true;
+                        }
+                },
+            [&](std::string const& fetched) mutable
+                {
+                    if (ebuild_data.pv < fetched)
+                        {
+                            is_changed = true;
+                        }
+                }});
+
+        if (is_changed)
+            {
+                LOG_INFO("New version!!!");
             }
 
         // return what has to be changed
@@ -732,28 +998,6 @@ namespace
                 ;
             }
     }
-
-    // boost::property_tree::ptree parse_rss_into_tree(std::string const&
-    // rss_feed)
-    // {
-    //     // LOG_DEBUG("Waiting for YouTube's RSS feed from stdin...");
-    //     // std::cin >> std::noskipws;
-    //     // std::istreambuf_iterator<char> start(std::cin);
-    //     // std::istreambuf_iterator<char> end;
-    //     // std::string xml_rss_youtube_feed(start, end);
-    //     // LOG_DEBUG("Received the YouTube's RSS feed.");
-    //     //
-    //     // boost::property_tree::ptree tree
-    //     //     = parse_rss_into_tree(xml_rss_youtube_feed);
-    //     LOG_DEBUG("Received something from stdin...");
-    //     LOG_TRACE_L1("rss_feed: {}", rss_feed);
-    //     boost::property_tree::ptree tree;
-    //     std::istringstream istr(rss_feed);
-    //     LOG_DEBUG("Trying to parse it as an XML...");
-    //     boost::property_tree::read_xml(istr, tree);
-    //     LOG_DEBUG("Successfully parsed an XML...");
-    //     return tree;
-    // }
 
     corral::Task<ReturnCode> actual_chief(auto& ioc, Config const& cfg)
     {
