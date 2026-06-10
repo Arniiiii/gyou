@@ -136,8 +136,15 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
             co_return std::unexpected(ec_resolve.message());
         }
 
+#if defined(__GNUC__) || defined(__clang__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
     if (!SSL_set_tlsext_host_name(stream.native_handle(),
                                   url.host_name().c_str()))
+#if defined(__GNUC__) || defined(__clang__)
+#    pragma GCC diagnostic pop
+#endif
         {
             co_return std::unexpected(
                 boost::beast::system_error(

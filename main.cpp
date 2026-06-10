@@ -77,52 +77,56 @@
 // `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
 template <typename T> struct Debug;
 
-template <class... Ts> struct overloads : Ts...
+namespace
 {
-    using Ts::operator()...;
-};
 
-constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
+    template <class... Ts> struct overloads : Ts...
+    {
+        using Ts::operator()...;
+    };
 
-// NOLINTNEXTLINE(performance-enum-size)
-enum class Service : size_t
-{
-    github = 0,
-    gitlab = 1,
-    bitbucket = 2,
-    codeberg = 3,
-    cpan = 4,
-    cpan_module = 5,
-    cpe = 6,
-    cran = 7,
-    ctan = 8,
-    freedesktop_gitlab = 9,
-    gentoo = 10,
-    gnome_gitlab = 11,
-    google_code = 12,
-    hackage = 13,
-    heptapod = 14,
-    kde_invent = 15,
-    launchpad = 16,
-    osdn = 17,
-    pear = 18,
-    pecl = 19,
-    pypi = 20,
-    rubygems = 21,
-    savannah = 22,
-    savannah_nongnu = 23,
-    sourceforge = 24,
-    sourcehut = 25,
-    vim = 26,
-};
+    constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
 
-// Fucking C++ without C99 designated array initializer extension makes me do
-// this shit.
-constexpr auto ServicesNames = std::invoke(
-    []()
-        {
-            constexpr auto not_a_map_because_of_fucking_cpp = std::to_array({
-                // clang-format off
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class Service : size_t
+    {
+        github = 0,
+        gitlab = 1,
+        bitbucket = 2,
+        codeberg = 3,
+        cpan = 4,
+        cpan_module = 5,
+        cpe = 6,
+        cran = 7,
+        ctan = 8,
+        freedesktop_gitlab = 9,
+        gentoo = 10,
+        gnome_gitlab = 11,
+        google_code = 12,
+        hackage = 13,
+        heptapod = 14,
+        kde_invent = 15,
+        launchpad = 16,
+        osdn = 17,
+        pear = 18,
+        pecl = 19,
+        pypi = 20,
+        rubygems = 21,
+        savannah = 22,
+        savannah_nongnu = 23,
+        sourceforge = 24,
+        sourcehut = 25,
+        vim = 26,
+    };
+
+    // Fucking C++ without C99 designated array initializer extension makes me
+    // do this shit.
+    constexpr auto ServicesNames = std::invoke(
+        []()
+            {
+                constexpr auto not_a_map_because_of_fucking_cpp
+                    = std::to_array({
+                        // clang-format off
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::bitbucket),"https://bitbucket.org/.*?"),
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::codeberg),"https://codeberg.org/.*?"),
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpan),"https://metacpan.org/dist/.*?"),
@@ -150,97 +154,95 @@ constexpr auto ServicesNames = std::invoke(
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourceforge),"https://sourceforge.net/projects/.*?"),
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourcehut),"https://sr.ht/.*?"),
     std::make_pair<size_t,std::string_view>(std::to_underlying(Service::vim),"https://www.vim.org/scripts/script.php?script_id=.*?")
-                // clang-format on
+                        // clang-format on
+                    });
+
+                std::array<std::string_view,
+                           std::size(not_a_map_because_of_fucking_cpp)>
+                    arr;
+
+                for (const auto& [pos, val] : not_a_map_because_of_fucking_cpp)
+                    {
+                        arr.at(pos) = val;
+                    }
+
+                return arr;
             });
 
-            std::array<std::string_view,
-                       std::size(not_a_map_because_of_fucking_cpp)>
-                arr;
+    struct Config
+    {
+        boost::beast::http::fields headers;
+        std::filesystem::path log_file;
+        std::filesystem::path path_to_repo;
+        std::filesystem::path path_to_portage_bin;
+        std::filesystem::path path_to_portage_temp;
+        std::filesystem::path path_to_portage_pym;
+        std::filesystem::path path_to_gentoo_repo;
+        size_t concurrency_per_service{};
+        quill::LogLevel log_level{};
+    };
 
-            for (const auto& [pos, val] : not_a_map_because_of_fucking_cpp)
-                {
-                    arr.at(pos) = val;
-                }
+    struct EntryData
+    {
+        std::string link_str;
+        std::string author;
+        std::string title;
+        std::string description;
+    };
 
-            return arr;
-        });
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class ReturnCode : int
+    {
+        Success = 0,
+        PartialSuccess = 1,
+        AllHaveFailed = 2,
+        NoEbuildFound = 3,
+        FailDuringParsingCmdValues = 4,
+        FailSpecifiedValueIsIncorrect = 5,
+        FailDuringInitializationConfig = 6,
+        FailStandardException = 7,
+        FailParsePromptResult = 8,
+        FailInitializationLogger = 9,
+        ReceivedCancellationSignal = 10,
 
-struct Config
-{
-    boost::beast::http::fields headers;
-    std::filesystem::path log_file;
-    std::filesystem::path path_to_repo;
-    std::filesystem::path path_to_portage_bin;
-    std::filesystem::path path_to_portage_temp;
-    std::filesystem::path path_to_portage_pym;
-    std::filesystem::path path_to_gentoo_repo;
-    quill::LogLevel log_level{};
-    size_t concurrency_per_service{};
-};
+    };
 
-struct EntryData
-{
-    std::string link_str;
-    std::string author;
-    std::string title;
-    std::string description;
-};
+    enum class PackageType
+    {
+        Unknown,
+        ReleaseOrTag,
+        Commit,
+    };
 
-// NOLINTNEXTLINE(performance-enum-size)
-enum class ReturnCode : int
-{
-    Success = 0,
-    PartialSuccess = 1,
-    AllHaveFailed = 2,
-    NoEbuildFound = 3,
-    FailDuringParsingCmdValues = 4,
-    FailSpecifiedValueIsIncorrect = 5,
-    FailDuringInitializationConfig = 6,
-    FailStandardException = 7,
-    FailParsePromptResult = 8,
-    FailInitializationLogger = 9,
-    ReceivedCancellationSignal = 10,
+    struct CommonContext
+    {
+        RE2 re_commit_str;
+        RE2 re_src_uri;
+        RE2 re_category;
+        RE2 re_pkg_9999;
+        RE2 re_pkg_with_date;
+        RE2::Set re_set_services;
+        reflex::PCRE2UTFMatcher re_version_matcher;
+    };
 
-};
+    struct CommitSpecific
+    {
+        uint64_t date{};
+        std::string commit;
+    };
 
-enum class PackageType
-{
-    Unknown,
-    ReleaseOrTag,
-    Commit,
-};
+    struct EbuildSpecificData
+    {
+        std::filesystem::path filepath;
+        std::string p;
+        std::string pv;
+        std::string pn;
+        std::string category;
+        std::string first_uri;
+        std::optional<CommitSpecific> commit_specific;
+        Service service{};
+    };
 
-struct CommonContext
-{
-    RE2 re_commit_str;
-    RE2 re_src_uri;
-    RE2 re_category;
-    RE2 re_pkg_9999;
-    RE2 re_pkg_with_date;
-    RE2::Set re_set_services;
-    reflex::PCRE2UTFMatcher re_version_matcher;
-};
-
-struct CommitSpecific
-{
-    uint64_t date;
-    std::string commit;
-};
-
-struct EbuildSpecificData
-{
-    std::filesystem::path filepath;
-    std::string p;
-    std::string pv;
-    std::string pn;
-    std::string category;
-    std::string first_uri;
-    std::optional<CommitSpecific> commit_specific;
-    Service service;
-};
-
-namespace
-{
     boost::property_tree::ptree parse_rss_into_tree(std::string const& rss_feed)
     {
         boost::property_tree::ptree tree;
@@ -390,10 +392,11 @@ namespace
         size_t match_id = 0;
         while (common_ctx.re_version_matcher[match_id].first != nullptr)
             {
-                LOG_DEBUG("sth: {}",
-                          std::string_view{
-                              common_ctx.re_version_matcher[match_id].first,
-                              common_ctx.re_version_matcher[match_id].second});
+                LOG_TRACE_L2(
+                    "sth: {}",
+                    std::string_view{
+                        common_ctx.re_version_matcher[match_id].first,
+                        common_ctx.re_version_matcher[match_id].second});
                 if (common_ctx.re_version_matcher[match_id].first == nullptr)
                     {
                         LOG_DEBUG("It is nullptr.");
@@ -401,14 +404,14 @@ namespace
                 ++match_id;
             }
 
-        auto pn = std::string{common_ctx.re_version_matcher[1].first,
-                              common_ctx.re_version_matcher[1].second};
-        auto pv = std::string{common_ctx.re_version_matcher[2].first,
-                              common_ctx.re_version_matcher[2].second};
-        LOG_DEBUG("PN: '{}' PV: '{}'", pn, pv);
+        auto pkg_n = std::string{common_ctx.re_version_matcher[1].first,
+                                 common_ctx.re_version_matcher[1].second};
+        auto pkg_v = std::string{common_ctx.re_version_matcher[2].first,
+                                 common_ctx.re_version_matcher[2].second};
+        LOG_DEBUG("PN: '{}' PV: '{}'", pkg_n, pkg_v);
         LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
         auto temp_folder_path_res
-            = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pv);
+            = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pkg_v);
 
         if (!temp_folder_path_res)
             {
@@ -483,8 +486,8 @@ namespace
         co_return EbuildSpecificData{
             .filepath = path_to_ebuild,
             .p = pkg_p,
-            .pv = pv,
-            .pn = pn,
+            .pv = pkg_v,
+            .pn = pkg_n,
             .category = category_str,
             .first_uri = std::string(src_uri_str),
             .commit_specific = std::invoke(
@@ -665,12 +668,12 @@ namespace
                                      static_cast<unsigned>(ymd.day()));
 
                         new_date = static_cast<uint64_t>(
-                            static_cast<uint64_t>(
-                                (static_cast<int>(ymd.year()) * 10000))
-                            + (static_cast<uint64_t>(
-                                   static_cast<unsigned>(ymd.month()))
-                               * 100)
-                            + static_cast<unsigned>(ymd.day()));
+                                       (static_cast<int>(ymd.year()) * 10000))
+                                   + (static_cast<uint64_t>(
+                                          static_cast<unsigned>(ymd.month()))
+                                      * 100)
+                                   + static_cast<uint64_t>(
+                                       static_cast<unsigned>(ymd.day()));
                     }
                 // do it only once to get info only for latest entry.
                 break;
@@ -699,13 +702,11 @@ namespace
     {
         // what is url of a feed for the service and the package? is it per tag,
         // per commit or per release? get feed, limit via semaphores write a
-        // concept, that has corral::Task<std::expected<std::string,
-        // ...>> get_new_version(common_data, data, semaphores, ioc), write
         // 27 different handlers. auto lock = co_await semaphores
         //                 .at(static_cast<size_t>(indeces_matched[0]))
         //                 .lock();
 
-        std::variant<CommitSpecific, std::string> fetched{};
+        std::variant<CommitSpecific, std::string> fetched_data{};
 
         switch (ebuild_data.service)
             {
@@ -717,7 +718,7 @@ namespace
                             {
                                 co_return std::unexpected(fetched_res.error());
                             }
-                        fetched = std::move(fetched_res.value());
+                        fetched_data = std::move(fetched_res.value());
                         break;
                     }
                 case Service::gitlab:
@@ -752,16 +753,35 @@ namespace
                     break;
             };
 
-        fetched.visit(overloads{
+        fetched_data.visit(overloads{
             [&](CommitSpecific const& fetched) mutable
                 { LOG_DEBUG("Fetched: {} {}", fetched.date, fetched.commit); },
             [&](std::string const& fetched)
                 { LOG_DEBUG("Fetched: {}", fetched); }});
-        co_return fetched;
+        co_return fetched_data;
     }
 
+    struct EditCommit
+    {
+        CommitSpecific old_ver;
+        CommitSpecific new_ver;
+    };
+
+    struct EditVerOrTag
+    {
+        std::string old_ver;
+        std::string new_ver;
+    };
+
+    struct InfoForDiff
+    {
+        std::filesystem::path path_to_ebuild;
+        std::variant<EditCommit, EditVerOrTag> data_for_how_to_change;
+    };
+
     //  return what to change
-    [[nodiscard]] corral::Task<std::expected<int, std::string>>
+    [[nodiscard]] corral::Task<
+        std::expected<std::optional<InfoForDiff>, std::string>>
     logic_per_ebuild(auto& ioc, Config const& cfg,
                      std::filesystem::directory_entry const& path_to_ebuild,
                      auto& semaphores, CommonContext& common_ctx)
@@ -778,11 +798,11 @@ namespace
             ebuild_data = std::move(ebuild_data_res.value());
         }
 
-        LOG_DEBUG("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
-                  ebuild_data.first_uri,
-                  magic_enum::enum_name(ebuild_data.service),
-                  ebuild_data.filepath, ebuild_data.p, ebuild_data.pn,
-                  ebuild_data.pv);
+        LOG_TRACE_L1("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
+                     ebuild_data.first_uri,
+                     magic_enum::enum_name(ebuild_data.service),
+                     ebuild_data.filepath, ebuild_data.p, ebuild_data.pn,
+                     ebuild_data.pv);
 
         if (ebuild_data.commit_specific.has_value())
             {
@@ -843,11 +863,28 @@ namespace
         if (is_changed)
             {
                 LOG_INFO("New version!!!");
+                InfoForDiff diff{};
+                fetched_ver.visit(overloads{
+                    [&](CommitSpecific const& fetched) mutable
+                        {
+                            diff = {.data_for_how_to_change = EditCommit{
+                                        .old_ver
+                                        = ebuild_data.commit_specific.value(),
+                                        .new_ver = fetched}};
+                        },
+                    [&](std::string const& fetched) mutable
+                        {
+                            diff = {.data_for_how_to_change
+                                    = EditVerOrTag{.old_ver = ebuild_data.pv,
+                                                   .new_ver = fetched}};
+                        }});
+                diff.path_to_ebuild = ebuild_data.filepath;
+                co_return diff;
             }
 
         // return what has to be changed
 
-        co_return 0;
+        co_return std::nullopt;
     }
 
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
@@ -891,7 +928,7 @@ namespace
             .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
         };
 
-        std::vector<int> bash_res;
+        std::vector<InfoForDiff> what_to_change;
         bool is_any_successful = false;
         bool is_any_failed = false;
 
@@ -953,7 +990,7 @@ namespace
                                                     = co_await logic_per_ebuild(
                                                         ioc, cfg, file_arg,
                                                         semaphores, common_ctx);
-                                                if (!sth)
+                                                if (not sth)
                                                     {
                                                         is_any_failed = true;
                                                         LOG_ERROR(
@@ -964,9 +1001,18 @@ namespace
                                                             sth.error());
                                                         co_return;
                                                     }
-                                                bash_res.emplace_back(
-                                                    sth.value());
-                                                is_any_successful = true;
+                                                if (not sth.value().has_value())
+                                                    {
+                                                        is_any_successful
+                                                            = true;
+                                                        LOG_INFO(
+                                                            "Nothing to change "
+                                                            "for {}",
+                                                            file_arg.path());
+                                                        co_return;
+                                                    }
+                                                what_to_change.emplace_back(
+                                                    sth.value().value());
                                             },
                                         file);
                                 }
@@ -975,11 +1021,33 @@ namespace
 
             co_return corral::join;
         };
-        LOG_INFO("Writing result to stdout...");
-        // std::stringstream strs;
-        // boost::property_tree::write_xml(strs, tree);
-        LOG_INFO("Wrote result to stdout.");
-        // co_return strs.str();
+
+        for (auto& diff : what_to_change)
+            {
+                if (std::holds_alternative<EditCommit>(
+                        diff.data_for_how_to_change))
+                    {
+                        EditCommit commits_diff
+                            = std::get<EditCommit>(diff.data_for_how_to_change);
+                        LOG_INFO(
+                            "Edit: path: '{}' old date: '{}' new date: '{}' "
+                            "old commit: '{}' new commit: '{}'",
+                            diff.path_to_ebuild, commits_diff.old_ver.date,
+                            commits_diff.new_ver.date,
+                            commits_diff.old_ver.commit,
+                            commits_diff.new_ver.commit);
+                    }
+                else if (std::holds_alternative<EditVerOrTag>(
+                             diff.data_for_how_to_change))
+                    {
+                        EditVerOrTag commits_diff = std::get<EditVerOrTag>(
+                            diff.data_for_how_to_change);
+                        LOG_INFO("Edit: path: '{}' old ver: '{}' new ver: '{}'",
+                                 diff.path_to_ebuild, commits_diff.old_ver,
+                                 commits_diff.new_ver);
+                    }
+            }
+
         if (is_any_failed and is_any_successful)
             {
                 co_return ReturnCode::PartialSuccess;
