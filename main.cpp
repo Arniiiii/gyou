@@ -1,15 +1,15 @@
-#include <chrono>
-#include <optional>
-#include <sstream>
-#include <variant>
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
 #include <array>
+#include <chrono>
 #include <expected>
 #include <filesystem>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include <CLI/CLI.hpp>
 #include <boost/algorithm/string/split.hpp>
