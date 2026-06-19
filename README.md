@@ -12,6 +12,8 @@ Conan package manager or other package manager with libraries that the project n
 
 ### Commands
 
+Adding some packages that are not in conan's public recipes:
+
 `cd ./conan_local_packages/corral/`
 
 `conan create .`
@@ -22,21 +24,29 @@ Conan package manager or other package manager with libraries that the project n
 
 `cd ../../`
 
+Installing deps:
+
+`conan install . --build=missing --output-folder=./build`
+
+Building the project:
+
 `cmake --preset conan-release`
 
 `cmake --build ./build`
 
+## Running project
+
 `mkdir /tmp/tmp_gyou`
 
-get your ebuild repo in a folder via sth like (fix your paths):
+Get your ebuild repo in a folder via sth like (fix your paths):
 
 `cd /home/donald/data/code/mygentoo/ && git clone https://github.com/Arniiiii/ex_repo;`
 
-get patched portage:
+Get patched portage:
 
 `cd /home/donald/data/code/experiments/ && git clone https://github.com/Arniiiii/portage `
 
-finally run the project:
+Finally run the project:
 
 `./build/gyou-0.0.0.2 --log-file console --log-level tracel1 --repo-path /home/donald/data/code/mygentoo/ex_repo --tmp-path /tmp/tmp_gyou/ --portage-bin-path /home/donald/data/code/experiments/portage/bin/ --portage-pym-path /tmp/tmp_gyou/ `
 
