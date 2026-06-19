@@ -779,6 +779,17 @@ namespace
         std::variant<EditCommit, EditVerOrTag> data_for_how_to_change;
     };
 
+/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
+#define TRY_OR_CO_RETURN(expr)                                      \
+    __extension__({                                                 \
+        auto&& _res = (expr);                                       \
+        if (!_res)                                                  \
+            {                                                       \
+                co_return std::unexpected(std::move(_res.error())); \
+            }                                                       \
+        std::move(*_res);                                           \
+    })
+
     //  return what to change
     [[nodiscard]] corral::Task<
         std::expected<std::optional<InfoForDiff>, std::string>>
@@ -786,17 +797,8 @@ namespace
                      std::filesystem::directory_entry const& path_to_ebuild,
                      auto& semaphores, CommonContext& common_ctx)
     {
-        EbuildSpecificData ebuild_data;
-        {
-            std::expected<EbuildSpecificData, std::string> ebuild_data_res
-                = co_await get_ebuild_info(ioc, cfg, common_ctx,
-                                           path_to_ebuild);
-            if (not ebuild_data_res)
-                {
-                    co_return std::unexpected(ebuild_data_res.error());
-                }
-            ebuild_data = std::move(ebuild_data_res.value());
-        }
+        EbuildSpecificData ebuild_data = TRY_OR_CO_RETURN(
+            co_await get_ebuild_info(ioc, cfg, common_ctx, path_to_ebuild));
 
         LOG_TRACE_L1("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
                      ebuild_data.first_uri,
@@ -811,19 +813,9 @@ namespace
                           ebuild_data.commit_specific.value().commit);
             }
 
-        std::variant<CommitSpecific, std::string> fetched_ver;
-        {
-            std::expected<std::variant<CommitSpecific, std::string>,
-                          std::string>
-                sth = co_await get_latest_info(ioc, cfg, semaphores, common_ctx,
-                                               ebuild_data);
-
-            if (!sth)
-                {
-                    co_return std::unexpected(sth.error());
-                }
-            fetched_ver = std::move(sth.value());
-        }
+        std::variant<CommitSpecific, std::string> fetched_ver
+            = TRY_OR_CO_RETURN(co_await get_latest_info(
+                ioc, cfg, semaphores, common_ctx, ebuild_data));
 
         LOG_DEBUG("Current ver: {}", ebuild_data.pv);
 
