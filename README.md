@@ -26,7 +26,19 @@ Conan package manager or other package manager with libraries that the project n
 
 `cmake --build ./build`
 
-`./build/gyou`
+`mkdir /tmp/tmp_gyou`
+
+get your ebuild repo in a folder via sth like (fix your paths):
+
+`cd /home/donald/data/code/mygentoo/ && git clone https://github.com/Arniiiii/ex_repo;`
+
+get patched portage:
+
+`cd /home/donald/data/code/experiments/ && git clone https://github.com/Arniiiii/portage `
+
+finally run the project:
+
+`./build/gyou-0.0.0.2 --log-file console --log-level tracel1 --repo-path /home/donald/data/code/mygentoo/ex_repo --tmp-path /tmp/tmp_gyou/ --portage-bin-path /home/donald/data/code/experiments/portage/bin/ --portage-pym-path /tmp/tmp_gyou/ `
 
 ## TODO
 
