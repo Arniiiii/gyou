@@ -29,20 +29,20 @@ extern quill::Logger* global_logger_a;
 // Define custom log macros using global_logger_a. Two examples are provided
 // here for demonstration.
 #define LOG_TRACE_L1(fmt, ...) \
-    QUILL_LOG_TRACE_L1(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_TRACE_L1(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_TRACE_L2(fmt, ...) \
-    QUILL_LOG_TRACE_L2(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_TRACE_L2(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_TRACE_L3(fmt, ...) \
-    QUILL_LOG_TRACE_L3(global_logger_a, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...) QUILL_LOG_DEBUG(global_logger_a, fmt, ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...) QUILL_LOG_INFO(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_TRACE_L3(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG_DEBUG(fmt, ...) QUILL_LOG_DEBUG(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG_INFO(fmt, ...) QUILL_LOG_INFO(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_NOTICE(fmt, ...) \
-    QUILL_LOG_NOTICE(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_NOTICE(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_WARNING(fmt, ...) \
-    QUILL_LOG_WARNING(global_logger_a, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) QUILL_LOG_ERROR(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_WARNING(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG_ERROR(fmt, ...) QUILL_LOG_ERROR(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_CRTITICAL(fmt, ...) \
-    QUILL_LOG_CRITICAL(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_CRITICAL(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 #define LOG_BACKTRACE(fmt, ...) \
-    QUILL_LOG_BACKTRACE(global_logger_a, fmt, ##__VA_ARGS__)
+    QUILL_LOG_BACKTRACE(global_logger_a, fmt __VA_OPT__(,) __VA_ARGS__)
 // etc ..

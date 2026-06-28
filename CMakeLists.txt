@@ -65,7 +65,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE re2::re2)
 find_package(liburing REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE liburing::liburing)
 find_package(Reflex REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE Reflex::ReflexLibStatic)
+target_link_libraries(${PROJECT_NAME} PRIVATE Reflex::ReflexLib)
 find_package(PCRE2 REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE pcre2::pcre2)
 

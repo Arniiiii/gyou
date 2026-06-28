@@ -879,6 +879,7 @@ namespace
         co_return std::nullopt;
     }
 
+
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
                                                        Config const& cfg,
                                                        auto& semaphores)
