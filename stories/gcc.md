@@ -34,7 +34,7 @@ auto const something = ({
 });
 ```
 
-Here's an example of use of it in the project:
+Here's an example of usage in the project:
 ```cpp
 /* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
 #define TRY_OR_CO_RETURN(expr)                                      \
@@ -64,7 +64,7 @@ But it compiles well with Clang.
 
 Why?
 
-Somehow related to use of `co_return` inside the extension.
+Somehow related to the use of `co_return` inside the extension.
 
 That's funny: GCC can't compile its own extension.
 
