@@ -696,7 +696,8 @@ namespace
     [[nodiscard]] corral::Task<
         std::expected<std::variant<CommitSpecific, std::string>, std::string>>
     get_latest_info(auto& ioc, Config const& cfg, auto& semaphores,
-                    CommonContext& common_ctx, EbuildSpecificData& ebuild_data)
+                    CommonContext& common_ctx,
+                    EbuildSpecificData const& ebuild_data)
     {
         // what is url of a feed for the service and the package? is it per tag,
         // per commit or per release? get feed, limit via semaphores write a
@@ -795,7 +796,7 @@ namespace
                      std::filesystem::directory_entry const& path_to_ebuild,
                      auto& semaphores, CommonContext& common_ctx)
     {
-        EbuildSpecificData ebuild_data = TRY_OR_CO_RETURN(
+        EbuildSpecificData const ebuild_data = TRY_OR_CO_RETURN(
             co_await get_ebuild_info(ioc, cfg, common_ctx, path_to_ebuild));
 
         LOG_TRACE_L1("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
