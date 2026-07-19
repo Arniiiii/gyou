@@ -159,7 +159,7 @@ namespace
         std::filesystem::path log_file;
         std::filesystem::path path_to_repo;
         std::filesystem::path path_to_portage_bin;
-        std::filesystem::path path_to_portage_temp;
+        std::filesystem::path path_to_tmp;
         std::filesystem::path path_to_portage_pym;
         std::filesystem::path path_to_gentoo_repo;
         size_t concurrency_per_service{};
@@ -190,6 +190,7 @@ namespace
         ReceivedCancellationSignal = 10,
         FailedReadingGroupCiFile = 11,
         FailedParsingGroupCiFile = 12,
+        FailedCreateDirTmpWorktrees = 13,
 
     };
 
@@ -269,15 +270,15 @@ namespace
             = path_to_ebuild.parent_path().parent_path().filename().string();
 
         std::filesystem::path temp_folder
-            = (cfg.path_to_portage_temp / category / pkg_full_name).concat("/");
+            = (cfg.path_to_tmp / category / pkg_full_name).concat("/");
 
         std::error_code errc_mkdir_p;
         std::filesystem::create_directories(temp_folder, errc_mkdir_p);
         if (errc_mkdir_p)
             {
-                co_return std::unexpected(
-                    fmt::format("Failed to create temp directory for a ebuild.",
-                                errc_mkdir_p.message()));
+                co_return std::unexpected(fmt::format(
+                    "Failed to create temp directory for a ebuild: {}",
+                    errc_mkdir_p.message()));
             };
 
         std::unordered_map<boost::process::environment::key,
@@ -1105,9 +1106,28 @@ namespace
                   std::move(group_to_change_);
               });
 
+        std::filesystem::path temp_folder_worktrees
+            = cfg.path_to_tmp / "worktrees";
+        std::error_code errc_mkdir_p_worktrees;
+        std::filesystem::create_directories(temp_folder_worktrees,
+                                            errc_mkdir_p_worktrees);
+        if (errc_mkdir_p_worktrees)
+            {
+                LOG_ERROR("Failed to create temp directory for worktrees: {}",
+                          errc_mkdir_p_worktrees.message());
+                co_return ReturnCode::FailedCreateDirTmpWorktrees;
+            };
+        LOG_TRACE_L2("Created folder for worktrees.");
+
         // logic for 0, i.e. no grouping
         auto range_grp_to_change_idx_no_grouping
             = group_to_change.equal_range(0);
+
+        for (auto it_grp_to_chg_idx = range_grp_to_change_idx_no_grouping.first;
+             it_grp_to_chg_idx != range_grp_to_change_idx_no_grouping.second;
+             ++it_grp_to_chg_idx)
+            {
+            }
 
         // logic for groups
 
@@ -1213,7 +1233,7 @@ int main(int argc, char* argv[])
         app.add_option("-R,--repo-path", cfg.path_to_repo, "Filepath to repo")
             ->required();
 
-        app.add_option("-t,--tmp-path", cfg.path_to_portage_temp,
+        app.add_option("-t,--tmp-path", cfg.path_to_tmp,
                        "Filepath to portage's tmp")
             ->required();
 

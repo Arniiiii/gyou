@@ -64,7 +64,7 @@ Finally run the project:
     - [ ] do actual logic for updating
       - [x] grouping of some packages: some packages can be updated together
       - [ ] actually write code for new stupid change and creating PR:
-        - [ ] new folder in tmp for worktrees
+        - [x] new folder in tmp for worktrees
         - [ ] creating new branch and the new worktree for it
             - `git worktree add -b branch_test/worktree ./test_worktree master`
         - [ ] applying changes
