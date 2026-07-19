@@ -67,7 +67,7 @@ corral::Task<std::expected<std::string, std::string>> typical_http_request(
     LOG_TRACE_L1("Request:\n{}", strs.str());
     stream.expires_after(MAX_PROMPT_TIME);
 
-    LOG_INFO("Sending request to an LLM...");
+    LOG_INFO("Sending request...");
     auto [ec_write, bytes_written] = co_await boost::beast::http::async_write(
         stream, request, corral::asio_nothrow_awaitable);
     if (ec_write)
@@ -192,7 +192,7 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
     LOG_TRACE_L2("Request:\n{}", strs.str());
     boost::beast::get_lowest_layer(stream).expires_after(MAX_PROMPT_TIME);
 
-    LOG_INFO("Sending request to an LLM...");
+    LOG_INFO("Sending request to an...");
     auto [ec_write, bytes_written] = co_await boost::beast::http::async_write(
         stream, request, corral::asio_nothrow_awaitable);
     if (ec_write)
