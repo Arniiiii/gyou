@@ -40,7 +40,7 @@ Building the project:
 
 Get your ebuild repo in a folder via sth like (fix your paths):
 
-`cd /home/donald/data/code/mygentoo/ && git clone https://github.com/Arniiiii/ex_repo;`
+`cd /home/donald/data/code/mygentoo/ && git clone https://github.com/Arniiiii/ex_repo`
 
 Get patched portage:
 
