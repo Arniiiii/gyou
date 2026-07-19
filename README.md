@@ -74,7 +74,7 @@ Finally run the project:
         - [ ] find out how to get statistics of on what code it wastes most of the time
         - [ ] try moving the code to separate module or header + source file
     - [ ] ci
-        - [ ] how it should look like? This project does not event have auto tests.
+        - [ ] how it should look like? This project does not even have auto tests.
     
 
 
