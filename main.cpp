@@ -1273,7 +1273,7 @@ int main(int argc, char* argv[])
                     = boost::stacktrace::stacktrace::from_current_exception();
                 std::string log = fmt::format(
                     R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
-This is an Omega exception. Most definitely an incorrect value was specified in args. 
+This is an Omega exception. Most definitely an incorrect value was specified in command line args. 
 
 Here's .what():
 {}
@@ -1307,6 +1307,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
                     std::cerr,
                     R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
 You know that standard exceptions sucks. 
+Also, this exception is from the part of parsing command line args. Most definitely an incorrect value was specified in args.
                 
 Here's .what():
 {}
