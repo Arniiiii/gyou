@@ -43,14 +43,28 @@ class corralRecipe(ConanFile):
         # rmdir(self, os.path.join(self.package_folder, "share"))
 
     def package_info(self):
-        # For header-only packages, libdirs and bindirs are not used
-        # so it's necessary to set those as empty.
-        self.cpp_info.bindirs = []
-        self.cpp_info.libdirs = []
-        self.cpp_info.set_property("cmake_file_name", "ReflexLib")
-        self.cpp_info.set_property("cmake_target_name", "Reflex::ReflexLib")
-        self.cpp_info.set_property("cmake_target_name", "Reflex::ReflexLibStatic")
-        # self.cpp_info.set_property("pkg_config_name", "ReflexLib")
+        if self.options.shared:
+            self.cpp_info.libs = ["reflex_shared_lib"]
+        else:
+            self.cpp_info.libs = ["reflex_static_lib"]
 
-    def package_id(self):
-        self.info.clear()
+        self.cpp_info.set_property("cmake_file_name", "Reflex")
+        self.cpp_info.set_property("cmake_target_name", "Reflex::ReflexLib")
+        self.cpp_info.set_property("pkg_config_name", "reflex")
+
+    # def package_info(self):
+    #     # For header-only packages, libdirs and bindirs are not used
+    #     # so it's necessary to set those as empty.
+    #     # self.cpp_info.bindirs = []
+    #     # self.cpp_info.libdirs = []
+    #     self.cpp_info.libs = ["reflex_static_lib"]
+    #     self.cpp_info.libs = ["ReflexLib"]
+    #     self.cpp_info.set_property("cmake_file_name", "Reflex")
+    #     self.cpp_info.set_property("cmake_target_name", "Reflex::ReflexLib")
+    #
+    #     self.cpp_info.set_property("pkg_config_name", "reflex")
+    #     # self.cpp_info.set_property("cmake_target_name", "Reflex::ReflexLibStatic")
+    #     # self.cpp_info.set_property("pkg_config_name", "ReflexLib")
+
+    # def package_id(self):
+    #     self.info.clear()

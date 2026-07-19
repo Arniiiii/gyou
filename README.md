@@ -63,8 +63,8 @@ Finally run the project:
   - [ ] grouping of some packages: some packages can be updated together
   - [ ] actually write code for (sequentially async, no parallelism, since IDK how to make it with `gh`. Maybe with worktrees?):
     - [ ] getting new branch
-    - [ ] appling changes
-    - [ ] creating pr
+    - [ ] applying changes
+    - [ ] creating MR
     - [ ] getting back to main branch
 
 ## Etimology

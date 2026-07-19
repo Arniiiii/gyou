@@ -1,5 +1,5 @@
-#ifndef INCLUDE_INCLUDE_HTTP_REQUESTS_HPP_
-#define INCLUDE_INCLUDE_HTTP_REQUESTS_HPP_
+#ifndef INCLUDE_GYOU_HTTP_REQUESTS_HPP_
+#define INCLUDE_GYOU_HTTP_REQUESTS_HPP_
 
 #include <expected>
 #include <string>
@@ -249,4 +249,4 @@ corral::Task<std::expected<std::string, std::string>> request_internet(
         }
 }
 
-#endif  // INCLUDE_INCLUDE_HTTP_REQUESTS_HPP_
+#endif  // INCLUDE_GYOU_HTTP_REQUESTS_HPP_

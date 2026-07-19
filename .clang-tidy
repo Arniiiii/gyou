@@ -1,5 +1,5 @@
 ---
-Checks: '*,-fuchsia-*,-google-*,-zircon-*,-abseil-*,-modernize-use-trailing-return-type,-llvm-*,-llvmlibc-*,-boost-use-ranges,-cppcoreguidelines-avoid-reference-coroutine-parameters'
+Checks: '*,-fuchsia-*,-google-*,-zircon-*,-abseil-*,-modernize-use-trailing-return-type,-llvm-*,-llvmlibc-*,-boost-use-ranges,-cppcoreguidelines-avoid-reference-coroutine-parameters,-altera-unroll-loops'
 CheckOptions: [{ key: misc-non-private-member-variables-in-classes, value: IgnoreClassesWithAllMemberVariablesBeingPublic }]
 WarningsAsErrors: ''
 HeaderFilterRegex: ''

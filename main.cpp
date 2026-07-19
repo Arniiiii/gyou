@@ -71,19 +71,17 @@
 #include "gyou/boost_stacktrace_format.hpp"
 #include "gyou/http_requests.hpp"
 #include "gyou/omega_exception.hpp"
+#include "gyou/parsing_groupsci.hpp"
+#include "gyou/variants_utils.hpp"
 #include "overwrite_log_macros.h"
 #include "quill_static.h"
+
 // it is for getting real type from compiler when debugging via
 // `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
 template <typename T> struct Debug;
 
 namespace
 {
-
-    template <class... Ts> struct overloads : Ts...
-    {
-        using Ts::operator()...;
-    };
 
     constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
 
@@ -121,53 +119,39 @@ namespace
 
     // Fucking C++ without C99 designated array initializer extension makes me
     // do this shit.
-    constexpr auto ServicesNames = std::invoke(
-        []()
-            {
-                constexpr auto not_a_map_because_of_fucking_cpp
-                    = std::to_array({
-                        // clang-format off
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::bitbucket),"https://bitbucket.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::codeberg),"https://codeberg.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpan),"https://metacpan.org/dist/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpan_module),"https://metacpan.org/pod/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cpe),"cpe:/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::cran),"https://cran.r-project.org/web/packages/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::ctan),"https://ctan.org/pkg/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::freedesktop_gitlab),"https://gitlab.freedesktop.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gentoo),"https://gitweb.gentoo.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::github),"https://github.com/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gitlab),"https://gitlab.com/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::gnome_gitlab),"https://gitlab.gnome.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::google_code),"https://code.google.com/archive/p/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::hackage),"https://hackage.haskell.org/package/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::heptapod),"https://foss.heptapod.net/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::kde_invent),"https://invent.kde.org/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::launchpad),"https://launchpad.net/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::osdn),"https://osdn.net/projects/.*?/"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pear),"https://pear.php.net/package/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pecl),"https://pecl.php.net/package/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::pypi),"https://pypi.org/project/.*?/"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::rubygems),"https://rubygems.org/gems/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::savannah),"https://savannah.gnu.org/projects/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::savannah_nongnu),"https://savannah.nongnu.org/projects/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourceforge),"https://sourceforge.net/projects/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::sourcehut),"https://sr.ht/.*?"),
-    std::make_pair<size_t,std::string_view>(std::to_underlying(Service::vim),"https://www.vim.org/scripts/script.php?script_id=.*?")
-                        // clang-format on
-                    });
-
-                std::array<std::string_view,
-                           std::size(not_a_map_because_of_fucking_cpp)>
-                    arr;
-
-                for (const auto& [pos, val] : not_a_map_because_of_fucking_cpp)
-                    {
-                        arr.at(pos) = val;
-                    }
-
-                return arr;
-            });
+    constexpr auto ServicesNames
+        = ArrayBuilder<std::string_view>()
+              .e<Service::bitbucket>("https://bitbucket.org/.*?")
+              .e<Service::codeberg>("https://codeberg.org/.*?")
+              .e<Service::cpan>("https://metacpan.org/dist/.*?")
+              .e<Service::cpan_module>("https://metacpan.org/pod/.*?")
+              .e<Service::cpe>("cpe:/.*?")
+              .e<Service::cran>("https://cran.r-project.org/web/packages/.*?")
+              .e<Service::ctan>("https://ctan.org/pkg/.*?")
+              .e<Service::freedesktop_gitlab>(
+                  "https://gitlab.freedesktop.org/.*?")
+              .e<Service::gentoo>("https://gitweb.gentoo.org/.*?")
+              .e<Service::github>("https://github.com/.*?")
+              .e<Service::gitlab>("https://gitlab.com/.*?")
+              .e<Service::gnome_gitlab>("https://gitlab.gnome.org/.*?")
+              .e<Service::google_code>("https://code.google.com/archive/p/.*?")
+              .e<Service::hackage>("https://hackage.haskell.org/package/.*?")
+              .e<Service::heptapod>("https://foss.heptapod.net/.*?")
+              .e<Service::kde_invent>("https://invent.kde.org/.*?")
+              .e<Service::launchpad>("https://launchpad.net/.*?")
+              .e<Service::osdn>("https://osdn.net/projects/.*?/")
+              .e<Service::pear>("https://pear.php.net/package/.*?")
+              .e<Service::pecl>("https://pecl.php.net/package/.*?")
+              .e<Service::pypi>("https://pypi.org/project/.*?/")
+              .e<Service::rubygems>("https://rubygems.org/gems/.*?")
+              .e<Service::savannah>("https://savannah.gnu.org/projects/.*?")
+              .e<Service::savannah_nongnu>(
+                  "https://savannah.nongnu.org/projects/.*?")
+              .e<Service::sourceforge>("https://sourceforge.net/projects/.*?")
+              .e<Service::sourcehut>("https://sr.ht/.*?")
+              .e<Service::vim>(
+                  "https://www.vim.org/scripts/script.php?script_id=.*?")
+              .build();
 
     struct Config
     {
@@ -204,10 +188,12 @@ namespace
         FailParsePromptResult = 8,
         FailInitializationLogger = 9,
         ReceivedCancellationSignal = 10,
+        FailedReadingGroupCiFile = 11,
+        FailedParsingGroupCiFile = 12,
 
     };
 
-    enum class PackageType
+    enum class PackageType : std::uint8_t
     {
         Unknown,
         ReleaseOrTag,
@@ -879,52 +865,18 @@ namespace
         co_return std::nullopt;
     }
 
-
-    [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
-                                                       Config const& cfg,
-                                                       auto& semaphores)
+    struct PackagesToUpdate
     {
-        // to compile them all at once
-        // NOLINTBEGIN(hicpp-signed-bitwise)
-        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
-            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
-            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
-        // NOLINTEND(hicpp-signed-bitwise)
-
-        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
-            str_re_versions);
-
-        CommonContext common_ctx{
-            .re_commit_str = RE2(
-                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
-                RE2::Quiet),
-            .re_src_uri = RE2(
-                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
-                RE2::Quiet),
-
-            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
-            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
-
-            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
-            .re_set_services = std::invoke(
-                []()
-                    {
-                        RE2::Set re_set_services(RE2::DefaultOptions,
-                                                 RE2::Anchor::UNANCHORED);
-                        for (auto&& service : ServicesNames)
-                            {
-                                re_set_services.Add(service, nullptr);
-                            }
-                        re_set_services.Compile();
-                        return re_set_services;
-                    }),
-            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
-        };
-
         std::vector<InfoForDiff> what_to_change;
         bool is_any_successful = false;
         bool is_any_failed = false;
+    };
 
+    [[nodiscard]] corral::Task<PackagesToUpdate> get_what_to_change(
+        auto& ioc, Config const& cfg, auto& semaphores,
+        CommonContext& common_ctx)
+    {
+        PackagesToUpdate changes;
         CORRAL_WITH_NURSERY(nursery)
         {
             for (const auto& category :
@@ -974,6 +926,7 @@ namespace
                                         {
                                             continue;
                                         }
+                                    // NOLINTBEGIN(cppcoreguidelines-avoid-capturing-lambda-coroutines)
                                     nursery.start(
                                         [&](std::filesystem::directory_entry
                                                 file_arg) mutable
@@ -985,7 +938,8 @@ namespace
                                                         semaphores, common_ctx);
                                                 if (not sth)
                                                     {
-                                                        is_any_failed = true;
+                                                        changes.is_any_failed
+                                                            = true;
                                                         LOG_ERROR(
                                                             "Failed to do "
                                                             "sth "
@@ -996,7 +950,8 @@ namespace
                                                     }
                                                 if (not sth.value().has_value())
                                                     {
-                                                        is_any_successful
+                                                        changes
+                                                            .is_any_successful
                                                             = true;
                                                         LOG_INFO(
                                                             "Nothing to change "
@@ -1004,18 +959,158 @@ namespace
                                                             file_arg.path());
                                                         co_return;
                                                     }
-                                                what_to_change.emplace_back(
-                                                    sth.value().value());
+                                                changes.what_to_change
+                                                    .emplace_back(
+                                                        sth.value().value());
                                             },
                                         file);
+                                    // NOLINTEND(cppcoreguidelines-avoid-capturing-lambda-coroutines)
                                 }
                         }
                 }
 
             co_return corral::join;
         };
+        co_return changes;
+    }
 
-        for (auto& diff : what_to_change)
+    [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
+                                                       Config const& cfg,
+                                                       auto& semaphores)
+    {
+        // to compile them all at once
+        // NOLINTBEGIN(hicpp-signed-bitwise)
+        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
+            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
+            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
+        // NOLINTEND(hicpp-signed-bitwise)
+
+        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
+            str_re_versions);
+
+        CommonContext common_ctx{
+            .re_commit_str = RE2(
+                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
+                RE2::Quiet),
+            .re_src_uri = RE2(
+                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
+                RE2::Quiet),
+
+            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
+            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
+
+            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
+            .re_set_services = std::invoke(
+                []()
+                    {
+                        RE2::Set re_set_services(RE2::DefaultOptions,
+                                                 RE2::Anchor::UNANCHORED);
+                        for (auto&& service : ServicesNames)
+                            {
+                                re_set_services.Add(service, nullptr);
+                            }
+                        re_set_services.Compile();
+                        return std::move(re_set_services);
+                    }),
+            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
+        };
+
+        PackagesToUpdate const changes
+            = co_await get_what_to_change(ioc, cfg, semaphores, common_ctx);
+
+        std::filesystem::path const path_to_grouping
+            = cfg.path_to_repo / "groups-ci.json";
+
+        std::string const str_grouping = __extension__({
+            auto res = co_await file_to_string(ioc, path_to_grouping);
+            if (!res)
+                {
+                    LOG_ERROR(
+                        "Got error during getting the groups-ci.json file : "
+                        "'{}'",
+                        std::move(res.error().message()));
+                    co_return ReturnCode::FailedReadingGroupCiFile;
+                };
+            std::move(res.value());
+        });
+
+        gyou::GroupsCollection const groups = __extension__({
+            auto res = gyou::parse_groups(str_grouping);
+            if (!res)
+                {
+                    LOG_ERROR(
+                        "Got error during parsing the groups-ci.json file : "
+                        "'{}'",
+                        std::move(res.error()));
+                    co_return ReturnCode::FailedParsingGroupCiFile;
+                }
+            std::move(res.value());
+        });
+
+        std::unordered_multimap<size_t, size_t> const group_to_change
+            = __extension__({
+                  std::unordered_multimap<size_t, size_t> group_to_change_{};
+                  group_to_change_.reserve(groups.amount_of_groups);
+
+                  for (size_t change_index = 0;
+                       change_index < std::size(changes.what_to_change);
+                       ++change_index)
+                      {
+                          auto const& diff
+                              = changes.what_to_change.at(change_index);
+                          std::string const pv_to_look
+                              = diff.path_to_ebuild.parent_path()
+                                    .parent_path()
+                                    .filename()
+                                    .string()
+                                + "/"
+                                + diff.path_to_ebuild.parent_path()
+                                      .filename()
+                                      .string();
+                          auto const it_str_to_group_index
+                              = groups.groups.find(pv_to_look);
+                          if (it_str_to_group_index != groups.groups.end())
+                              {
+                                  LOG_TRACE_L1(
+                                      "Found match to a group: pkg_name: '{}' "
+                                      "group index: {}",
+                                      pv_to_look,
+                                      it_str_to_group_index->second);
+                                  group_to_change_.emplace(
+                                      it_str_to_group_index->second,
+                                      change_index);
+                              }
+                          else
+                              {
+                                  LOG_TRACE_L1(
+                                      "Have not found match to a group: "
+                                      "pkg_name: '{}'",
+                                      pv_to_look);
+                                  group_to_change_.emplace(0, change_index);
+                              }
+                      }
+                  std::move(group_to_change_);
+              });
+
+        // logic for 0, i.e. no grouping
+        auto range_grp_to_change_idx_no_grouping
+            = group_to_change.equal_range(0);
+
+        // logic for groups
+
+        for (size_t group_num = 1; group_num < groups.amount_of_groups + 1;
+             ++group_num)
+            {
+                auto range_grp_to_change_idx
+                    = group_to_change.equal_range(group_num);
+                for (auto it_grp_to_chg_idx = range_grp_to_change_idx.first;
+                     it_grp_to_chg_idx != range_grp_to_change_idx.second;
+                     ++it_grp_to_chg_idx)
+                    {
+                    }
+            }
+
+        for (auto const& diff : changes.what_to_change)
             {
                 if (std::holds_alternative<EditCommit>(
                         diff.data_for_how_to_change))
@@ -1041,15 +1136,15 @@ namespace
                     }
             }
 
-        if (is_any_failed and is_any_successful)
+        if (changes.is_any_failed and changes.is_any_successful)
             {
                 co_return ReturnCode::PartialSuccess;
             }
-        else if (is_any_failed and not is_any_successful)
+        else if (changes.is_any_failed and not changes.is_any_successful)
             {
                 co_return ReturnCode::AllHaveFailed;
             }
-        else if (not is_any_successful)
+        else if (not changes.is_any_successful)
             {
                 co_return ReturnCode::NoEbuildFound;
             }
