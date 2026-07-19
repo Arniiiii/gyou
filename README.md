@@ -52,20 +52,31 @@ Finally run the project:
 
 ## TODO
 
-- [x] collect what packages can be theoretically updated
-  - [x] parsing file tree of an ebuild repo
-  - [x] parsing ebuilds
-    - [x] done via calling patched `bin/ebuild.sh` from portage.
-  - [x] sending requests to GitHub and possibly to other services to get latest version.
-    - [x] GitHub
-    - [ ] other services
-- [ ] do actual logic for updating
-  - [ ] grouping of some packages: some packages can be updated together
-  - [ ] actually write code for (sequentially async, no parallelism, since IDK how to make it with `gh`. Maybe with worktrees?):
-    - [ ] getting new branch
-    - [ ] applying changes
-    - [ ] creating MR
-    - [ ] getting back to main branch
+- [ ] logic
+    - [x] collect what packages can be theoretically updated
+      - [x] parsing file tree of an ebuild repo
+      - [x] parsing ebuilds
+        - [x] done via calling patched `bin/ebuild.sh` from portage.
+      - [x] sending requests to GitHub and possibly to other services to get latest version.
+        - [x] GitHub
+        - [ ] other services
+    - [ ] do actual logic for updating
+      - [x] grouping of some packages: some packages can be updated together
+      - [ ] actually write code for (sequentially async, no parallelism, since IDK how to make it with `gh`. Maybe with worktrees?):
+        - [ ] getting new branch
+        - [ ] applying changes
+        - [ ] creating MR
+        - [ ] getting back to main branch
+- [ ] maintenance
+    - [ ] improve warm compile time
+        - [ ] find out how to get statistics of on what code it wastes most of the time
+        - [ ] try moving the code to separate module or header + source file
+    - [ ] ci
+        - [ ] how it should look like? This project does not event have auto tests.
+    
+
+
+
 
 ## Etimology
 
