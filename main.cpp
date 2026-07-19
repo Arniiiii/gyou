@@ -1272,20 +1272,24 @@ int main(int argc, char* argv[])
                     trace
                     = boost::stacktrace::stacktrace::from_current_exception();
                 std::string log = fmt::format(
-                    "Oohh, look at you, who got an exception, my cutie "
-                    "lovely "
-                    "guy. "
-                    "\nThis is an Omega exception. Most definitely an "
-                    "incorrect "
-                    "value was specified in args. Here's "
-                    ".what():\n\n{}\nHere's data:\n{}\n Here's "
-                    "trace:\n{}\nHere's "
-                    "line where something failed:\n{}\n\nHere's an attempt "
-                    "to "
-                    "get "
-                    "backtrace of it "
-                    "via "
-                    "boost::stacktrace and libbacktrace...",
+                    R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+This is an Omega exception. Most definitely an incorrect value was specified in args. 
+
+Here's .what():
+{}
+
+Here's data:
+{}
+
+Here's trace:
+{}
+
+Here's line where something failed:
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
+{}
+)",
                     e.what(), e.data(), e.stack(), e.where(),
                     boost::stacktrace::to_string(trace));
 
@@ -1299,17 +1303,18 @@ int main(int argc, char* argv[])
                     std::allocator<boost::stacktrace::frame>>
                     trace
                     = boost::stacktrace::stacktrace::from_current_exception();
-                fmt::print(std::cerr,
-                           "Oohh, look at you, who got an exception, my cutie "
-                           "lovely guy. "
-                           "\nYou know that standard exceptions sucks. Here's "
-                           ".what():\n\n{}\n\nHere's an attempt to get "
-                           "backtrace of it "
-                           "via "
-                           "boost::stacktrace and libbacktrace... Hope it "
-                           "works or kill "
-                           "youself debugging this shit.\n{}\n",
-                           e.what(), boost::stacktrace::to_string(trace));
+                fmt::print(
+                    std::cerr,
+                    R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+You know that standard exceptions sucks. 
+                
+Here's .what():
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace... Hope it works or kill youself debugging this shit:
+{}
+)",
+                    e.what(), boost::stacktrace::to_string(trace));
                 return std::to_underlying(
                     ReturnCode::FailDuringInitializationConfig);
             }
@@ -1325,17 +1330,19 @@ int main(int argc, char* argv[])
             boost::stacktrace::basic_stacktrace<
                 std::allocator<boost::stacktrace::frame>>
                 trace = boost::stacktrace::stacktrace::from_current_exception();
-            fmt::print(std::cerr,
-                       "Oohh, look at you, who got an exception, my cutie "
-                       "lovely guy. "
-                       "\nYou know that standard exceptions sucks. Here's "
-                       ".what():\n\n{}\n\nHere's an attempt to get "
-                       "backtrace of it "
-                       "via "
-                       "boost::stacktrace and libbacktrace... Hope it "
-                       "works or kill "
-                       "youself debugging this shit.\n{}\n",
-                       e.what(), boost::stacktrace::to_string(trace));
+            fmt::print(
+                std::cerr,
+                R"(Oohh, look at you, who got an exception, my cutie lovely guy.  
+You know that standard exceptions sucks. 
+Also, this exception appeared during setting up logging.
+
+Here's .what():
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace... Hope it works or kill youself debugging this shit:
+{}
+)",
+                e.what(), boost::stacktrace::to_string(trace));
             return std::to_underlying(ReturnCode::FailInitializationLogger);
         }
 
@@ -1360,18 +1367,24 @@ int main(int argc, char* argv[])
                 std::allocator<boost::stacktrace::frame>>
                 trace = boost::stacktrace::stacktrace::from_current_exception();
             std::string log = fmt::format(
-                "Oohh, look at you, who got an exception, my cutie lovely "
-                "guy. "
-                "\nThis is an Omega exception. Maybe from checking whether a "
-                "file exists.\n\n"
-                "Here's "
-                ".what():\n{}\n\nHere's data: \n{}\n\n Here's "
-                "trace:\n{}\n\nHere's "
-                "line where something failed:\n{}\n\nHere's an attempt to "
-                "get "
-                "backtrace of it "
-                "via "
-                "boost::stacktrace and libbacktrace: \n{}\n",
+                R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+This is an Omega exception. Maybe from checking whether a file exists.
+
+Here's .what():
+{}
+
+Here's data: 
+{}
+
+Here's trace:
+{}
+
+Here's line where something failed:
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace: 
+{}
+)",
                 e.what(), e.data(), e.stack(), e.where(),
                 boost::stacktrace::to_string(trace));
 
@@ -1385,18 +1398,24 @@ int main(int argc, char* argv[])
                 std::allocator<boost::stacktrace::frame>>
                 trace = boost::stacktrace::stacktrace::from_current_exception();
             std::string log = fmt::format(
-                "Oohh, look at you, who got an exception, my cutie lovely "
-                "guy. "
-                "\nThis is an Omega exception. Maybe from parsing result "
-                "from "
-                "Ollama. Here's "
-                ".what():\n\n{}\nHere's data:\n{}\n Here's "
-                "trace:\n{}\nHere's "
-                "line where something failed:\n{}\n\nHere's an attempt to "
-                "get "
-                "backtrace of it "
-                "via "
-                "boost::stacktrace and libbacktrace...",
+                R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+This is a generic Omega exception.
+
+Here's .what():
+{}
+
+Here's data:
+{}
+
+Here's trace:
+{}
+
+Here's line where something failed:
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
+{}
+)",
                 e.what(), e.data(), e.stack(), e.where(),
                 boost::stacktrace::to_string(trace));
 
@@ -1410,15 +1429,15 @@ int main(int argc, char* argv[])
                 std::allocator<boost::stacktrace::frame>>
                 trace = boost::stacktrace::stacktrace::from_current_exception();
             std::string log = fmt::format(
-                "Oohh, look at you, who got an exception, my cutie lovely "
-                "guy. "
-                "\nYou know that standard exceptions sucks. Here's "
-                ".what():\n\n{}\n\nHere's an attempt to get backtrace of "
-                "it "
-                "via "
-                "boost::stacktrace and libbacktrace... Hope it works or "
-                "kill "
-                "youself debugging this shit.\n{}\n",
+                R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+You know that standard exceptions sucks. 
+
+Here's .what():
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace... Hope it works or kill youself debugging this shit:
+{}
+)",
                 e.what(), boost::stacktrace::to_string(trace));
 
             fmt::print(std::cerr, "{}", log);
