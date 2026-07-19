@@ -300,8 +300,20 @@ namespace
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
+        LOG_DEBUG("Presumably running next command: '{}'",
+                  (cfg.path_to_portage_bin / "ebuild.sh").string() + " "
+                      + "_internal_test" + " " + path_to_ebuild.string());
+
+        auto const path_to_ebuild_sh = cfg.path_to_portage_bin / "ebuild.sh";
+        if (not std::filesystem::exists(path_to_ebuild_sh))
+            {
+                throw OmegaException<std::filesystem::path>(
+                    "An expected executable does not exists.",
+                    path_to_ebuild_sh);
+            }
+
         auto proc = boost::process::process(
-            ioc, (cfg.path_to_portage_bin / "ebuild.sh").string(),
+            ioc, path_to_ebuild_sh.string(),
             {"_internal_test", path_to_ebuild.string()},
             boost::process::process_stdio{.in = {/* in to default */},
                                           .out = rp_stdout,
@@ -1341,6 +1353,31 @@ int main(int argc, char* argv[])
                     return std::to_underlying(main_opt.value());
                 }
             return std::to_underlying(ReturnCode::ReceivedCancellationSignal);
+        }
+    catch (OmegaException<std::filesystem::path>& e)
+        {
+            boost::stacktrace::basic_stacktrace<
+                std::allocator<boost::stacktrace::frame>>
+                trace = boost::stacktrace::stacktrace::from_current_exception();
+            std::string log = fmt::format(
+                "Oohh, look at you, who got an exception, my cutie lovely "
+                "guy. "
+                "\nThis is an Omega exception. Maybe from checking whether a "
+                "file exists.\n\n"
+                "Here's "
+                ".what():\n{}\n\nHere's data: \n{}\n\n Here's "
+                "trace:\n{}\n\nHere's "
+                "line where something failed:\n{}\n\nHere's an attempt to "
+                "get "
+                "backtrace of it "
+                "via "
+                "boost::stacktrace and libbacktrace: \n{}\n",
+                e.what(), e.data(), e.stack(), e.where(),
+                boost::stacktrace::to_string(trace));
+
+            fmt::print(std::cerr, "{}", log);
+            LOG_ERROR("{}", log);
+            return std::to_underlying(ReturnCode::FailParsePromptResult);
         }
     catch (OmegaException<std::string>& e)
         {
