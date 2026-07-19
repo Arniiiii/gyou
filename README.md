@@ -56,7 +56,8 @@ Finally run the project:
     - [x] collect what packages can be theoretically updated
       - [x] parsing file tree of an ebuild repo
       - [x] parsing ebuilds
-        - [x] done via calling patched `bin/ebuild.sh` from portage.
+        - [x] done via calling patched `bin/ebuild.sh` from portage and parsing the `environment` file.
+            - [ ] copy the idea from `pkgcruft` of using a pipe to bash somehow
       - [x] sending requests to GitHub and possibly to other services to get latest version.
         - [x] GitHub
         - [ ] other services
@@ -64,8 +65,8 @@ Finally run the project:
       - [x] grouping of some packages: some packages can be updated together
       - [ ] actually write code for new stupid change and creating PR:
         - [ ] new folder in tmp for worktrees
-        - [ ] new folder per each worktree
         - [ ] creating new branch and the new worktree for it
+            - `git worktree add -b branch_test/worktree ./test_worktree master`
         - [ ] applying changes
         - [ ] creating MR, while cwd in a specific worktree. `gh` for now
             - [ ] how to check whether PR already exist?
