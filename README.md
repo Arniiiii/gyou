@@ -62,11 +62,13 @@ Finally run the project:
         - [ ] other services
     - [ ] do actual logic for updating
       - [x] grouping of some packages: some packages can be updated together
-      - [ ] actually write code for (sequentially async, no parallelism, since IDK how to make it with `gh`. Maybe with worktrees?):
-        - [ ] getting new branch
+      - [ ] actually write code for new stupid change and creating PR:
+        - [ ] new folder in tmp for worktrees
+        - [ ] new folder per each worktree
+        - [ ] creating new branch and the new worktree for it
         - [ ] applying changes
-        - [ ] creating MR
-        - [ ] getting back to main branch
+        - [ ] creating MR, while cwd in a specific worktree. `gh` for now
+            - [ ] how to check whether PR already exist?
 - [ ] maintenance
     - [ ] improve warm compile time
         - [ ] find out how to get statistics of on what code it wastes most of the time
