@@ -25,6 +25,7 @@
 #include <boost/asio/read.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/stream_file.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
@@ -286,6 +287,31 @@ namespace
                 co_return std::unexpected(errc);
             }
         co_return str_of_file;
+    }
+
+    [[nodiscard]] corral::Task<std::expected<void, boost::system::error_code>>
+    string_to_file(auto& ioc, std::string const& content,
+                   std::filesystem::path const& file_path)
+    {
+        if (not std::filesystem::exists(file_path))
+            {
+                throw OmegaException<std::filesystem::path>(
+                    "It was requested to write a string into a file "
+                    "asynchronously, but the file already exists. Refusing to "
+                    "rewrite a file.",
+                    file_path);
+            }
+        boost::asio::stream_file file_writer(
+            ioc, file_path, boost::asio::stream_file::write_only);
+
+        auto&& [errc, bytes_read] = co_await boost::asio::async_write(
+            file_writer, boost::asio::buffer(content),
+            corral::asio_nothrow_awaitable);
+        if (errc && boost::asio::error::eof != errc)
+            {
+                co_return std::unexpected(errc);
+            }
+        co_return {};
     }
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>>
@@ -906,6 +932,43 @@ namespace
         std::move(*_res);                                           \
     })
 
+/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage,cppcoreguidelines-avoid-do-while)
+ */
+#define TRY_OR_CO_RETURN_VOID(expr)                                     \
+    do                                                                  \
+        {                                                               \
+            auto&& _res = (expr);                                       \
+            if (!_res)                                                  \
+                {                                                       \
+                    co_return std::unexpected(std::move(_res.error())); \
+                }                                                       \
+        }                                                               \
+    while (0)
+
+/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage,cppcoreguidelines-avoid-do-while)
+ */
+#define TRY_OR_CO_RETURN_VOID_TRANSFORM_ERROR(expr, expr2)                     \
+    do                                                                         \
+        {                                                                      \
+            auto&& _res = (expr);                                              \
+            if (!_res)                                                         \
+                {                                                              \
+                    co_return std::unexpected(expr2(std::move(_res.error()))); \
+                }                                                              \
+        }                                                                      \
+    while (0)
+
+/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
+#define TRY_OR_CO_RETURN_TRANSFORM_ERROR(expr, expr2)                      \
+    __extension__({                                                        \
+        auto&& _res = (expr);                                              \
+        if (!_res)                                                         \
+            {                                                              \
+                co_return std::unexpected(expr2(std::move(_res.error()))); \
+            }                                                              \
+        std::move(*_res);                                                  \
+    })
+
     //  return what to change
     [[nodiscard]] corral::Task<
         std::expected<std::optional<InfoForDiff>, std::string>>
@@ -1111,8 +1174,7 @@ namespace
     }
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>> apply_change(
-        auto& ioc, Config const& cfg, CommonContext& common_ctx,
-        std::filesystem::path const where_to_change,
+        auto& ioc, std::filesystem::path const where_to_change,
         InfoForDiff const& diff_info)
     {
         LOG_INFO("Trying to apply a change for next ebuild: {}",
@@ -1120,10 +1182,60 @@ namespace
         if (std::holds_alternative<EditCommit>(
                 diff_info.data_for_how_to_change))
             {
+                auto const& diff_details
+                    = std::get<EditCommit>(diff_info.data_for_how_to_change);
                 // change commit in ebuild
+
+                std::string const editted_ebuild_content = __extension__({
+                    std::string ebuild_content
+                        = TRY_OR_CO_RETURN_TRANSFORM_ERROR(
+                            co_await file_to_string(ioc,
+                                                    diff_info.path_to_ebuild),
+                            [](boost::system::error_code errc)
+                                { return errc.what(); });
+                    gyou::Replace(std::move(ebuild_content),
+                                  diff_details.old_ver.commit,
+                                  diff_details.new_ver.commit);
+                });
+
+                std::string const new_name = gyou::Replace(
+                    diff_info.path_to_ebuild.filename().string(),
+                    fmt::format("{}", diff_details.old_ver.date),
+                    fmt::format("{}", diff_details.new_ver.date));
+
+                std::filesystem::path const path_base
+                    = where_to_change
+                      / (diff_info.path_to_ebuild.parent_path()
+                             .parent_path()
+                             .filename())
+                      / diff_info.path_to_ebuild.parent_path().filename();
+
+                std::filesystem::path const old_path
+                    = path_base / diff_info.path_to_ebuild.filename();
+                std::filesystem::path const new_path = path_base / new_name;
+
+                TRY_OR_CO_RETURN_VOID_TRANSFORM_ERROR(
+                    co_await string_to_file(ioc, editted_ebuild_content,
+                                            old_path),
+                    [](boost::system::error_code errc) { return errc.what(); });
 
                 // move the file to a file with new date. for now, just use
                 // std::filesystem::rename
+                {
+                    std::error_code errc;
+                    std::filesystem::rename(old_path, new_path, errc);
+                    if (errc)
+                        {
+                            co_return std::unexpected(fmt::format(
+                                "During applying changes, failed to "
+                                "rename a file from '{}' to "
+                                "'{}'. errc,message: '{}'",
+                                old_path, new_path, errc.message()));
+                        };
+                }
+                LOG_INFO(
+                    "Presumably successfully applied change to the ebuild: {}",
+                    diff_info.path_to_ebuild);
                 co_return {};
             }
         else if (std::holds_alternative<EditVerOrTag>(
@@ -1152,17 +1264,21 @@ namespace
 
                 // this probably should be recoded via async rename via liburing
                 // or whatever
-                std::error_code errc;
-                std::filesystem::rename(old_path, new_path, errc);
-                if (errc)
-                    {
-                        co_return std::unexpected(
-                            fmt::format("During applying changes, failed to "
-                                        "rename a file from '{}' to "
-                                        "'{}'. errc,message: '{}'",
-                                        old_path, new_path, errc.message()));
-                    };
-
+                {
+                    std::error_code errc;
+                    std::filesystem::rename(old_path, new_path, errc);
+                    if (errc)
+                        {
+                            co_return std::unexpected(fmt::format(
+                                "During applying changes, failed to "
+                                "rename a file from '{}' to "
+                                "'{}'. errc,message: '{}'",
+                                old_path, new_path, errc.message()));
+                        };
+                }
+                LOG_INFO(
+                    "Presumably successfully applied change to the ebuild: {}",
+                    diff_info.path_to_ebuild);
                 co_return {};
             }
 
@@ -1404,7 +1520,7 @@ namespace
 
                                 {
                                     auto res = co_await apply_change(
-                                        ioc, cfg, common_ctx, folder_path,
+                                        ioc, folder_path,
                                         changes.what_to_change.at(chg_idx));
                                     if (not res)
                                         {

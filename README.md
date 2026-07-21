@@ -67,7 +67,7 @@ Finally run the project:
         - [x] new folder in tmp for worktrees
         - [x] creating new branch and the new worktree for it
             - `git worktree add -b branch_test/worktree ./test_worktree master`
-        - [ ] applying changes
+        - [x] applying changes
         - [ ] creating MR, while cwd in a specific worktree. `gh` for now
             - [ ] how to check whether PR already exist?
 - [ ] maintenance
