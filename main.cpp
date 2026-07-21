@@ -1,3 +1,4 @@
+#include <boost/process/v2/start_dir.hpp>
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
@@ -68,7 +69,7 @@
 #include <reflex/pcre2matcher.h>
 
 #include "gyou/array_utils.hpp"
-#include "gyou/boost_stacktrace_format.hpp"
+#include "gyou/boost_stacktrace_format.hpp"  // IWYU pragma: keep
 #include "gyou/http_requests.hpp"
 #include "gyou/omega_exception.hpp"
 #include "gyou/parsing_groupsci.hpp"
@@ -153,6 +154,7 @@ namespace
                   "https://www.vim.org/scripts/script.php?script_id=.*?")
               .build();
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct Config
     {
         boost::beast::http::fields headers;
@@ -162,10 +164,12 @@ namespace
         std::filesystem::path path_to_tmp;
         std::filesystem::path path_to_portage_pym;
         std::filesystem::path path_to_gentoo_repo;
+        std::string main_branch_name;
         size_t concurrency_per_service{};
         quill::LogLevel log_level{};
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct EntryData
     {
         std::string link_str;
@@ -191,6 +195,10 @@ namespace
         FailedReadingGroupCiFile = 11,
         FailedParsingGroupCiFile = 12,
         FailedCreateDirTmpWorktrees = 13,
+        FailedToFindGit = 14,
+        FailedToFindGh = 15,
+        FailedMakingGitToMakeWorktrees = 16,
+        FailedGhIsNotLoggedIn = 17,
 
     };
 
@@ -201,6 +209,7 @@ namespace
         Commit,
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct CommonContext
     {
         RE2 re_commit_str;
@@ -212,12 +221,22 @@ namespace
         reflex::PCRE2UTFMatcher re_version_matcher;
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct CommitSpecific
     {
         uint64_t date{};
         std::string commit;
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
+    struct EbuildCommitSpecific
+    {
+        uint64_t date{};
+        std::string commit;
+        std::string env_var_name;
+    };
+
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct EbuildSpecificData
     {
         std::filesystem::path filepath;
@@ -226,7 +245,7 @@ namespace
         std::string pn;
         std::string category;
         std::string first_uri;
-        std::optional<CommitSpecific> commit_specific;
+        std::optional<EbuildCommitSpecific> commit_specific;
         Service service{};
     };
 
@@ -256,6 +275,79 @@ namespace
                 co_return std::unexpected(errc);
             }
         co_return str_of_file;
+    }
+
+    [[nodiscard]] corral::Task<std::expected<void, std::string>>
+    git_create_worktree(auto& ioc, Config const& cfg,
+                        std::filesystem::path const& path_to_git,
+                        std::filesystem::path const& folder_path,
+                        std::string const& branch_name)
+    {
+        boost::asio::readable_pipe rp_stdout{ioc};
+        boost::asio::readable_pipe rp_stderr{ioc};
+
+        LOG_DEBUG("Presumably running next command: '{}'",
+                  fmt::format("{} worktree add -b {} {} {}", path_to_git,
+                              branch_name, folder_path, cfg.main_branch_name));
+
+        auto proc = boost::process::process(
+            ioc, path_to_git.string(),
+            {"worktree", "add", "-b", branch_name, folder_path.string(),
+             cfg.main_branch_name},
+            boost::process::process_stdio{.in = {/* in to default */},
+                                          .out = rp_stdout,
+                                          .err = rp_stderr},
+            boost::process::process_start_dir(cfg.path_to_repo.string()));
+
+        LOG_DEBUG("Waiting until git does it job, probably");
+
+        std::string stdout_s;
+        std::string stderr_s;
+
+        auto [proc_tuple, _, _] = co_await corral::allOf(
+            proc.async_wait(corral::asio_nothrow_awaitable),
+            boost::asio::async_read(rp_stdout,
+                                    boost::asio::dynamic_buffer(stdout_s),
+                                    corral::asio_nothrow_awaitable),
+            boost::asio::async_read(rp_stderr,
+                                    boost::asio::dynamic_buffer(stderr_s),
+                                    corral::asio_nothrow_awaitable));
+        auto&& [_, errc_proc] = proc_tuple;
+
+        if (errc_proc != 0)
+            {
+                co_return std::unexpected(
+                    fmt::format("Failed to create a worktree: ec: {}\nstderr: "
+                                "{}\nstdout: {}",
+                                errc_proc, stderr_s, stdout_s));
+            }
+
+        LOG_DEBUG("Presumably finished OK for next worktree path: {}",
+                  folder_path);
+        co_return {};
+    }
+
+    [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
+    gh_create_pr(auto& ioc, Config const& cfg,
+                 std::filesystem::path const& folder_path,
+                 std::string const& branch_name)
+    {
+        std::filesystem::path const path_to_gh = __extension__({
+            auto smth = boost::process::environment::find_executable("gh");
+            if (smth.empty())
+                {
+                    co_return std::unexpected(
+                        "Failed to find 'gh' executable in your environment.");
+                }
+            std::filesystem::path(std::move(smth).native());
+        });
+
+        // check if authorized in any account via `gh auth status` and regex
+        // `Logged in to github.com account`
+
+        // somehow check whether we need a pr
+
+        // create pr
     }
 
     [[nodiscard]] corral::Task<
@@ -306,12 +398,6 @@ namespace
                       + "_internal_test" + " " + path_to_ebuild.string());
 
         auto const path_to_ebuild_sh = cfg.path_to_portage_bin / "ebuild.sh";
-        if (not std::filesystem::exists(path_to_ebuild_sh))
-            {
-                throw OmegaException<std::filesystem::path>(
-                    "An expected executable does not exists.",
-                    path_to_ebuild_sh);
-            }
 
         auto proc = boost::process::process(
             ioc, path_to_ebuild_sh.string(),
@@ -490,13 +576,15 @@ namespace
             .category = category_str,
             .first_uri = std::string(src_uri_str),
             .commit_specific = std::invoke(
-                [&]() -> std::optional<CommitSpecific>
+                [&]() -> std::optional<EbuildCommitSpecific>
                     {
                         if (PackageType::Commit == pkg_type)
                             {
-                                return CommitSpecific{
+                                return EbuildCommitSpecific{
                                     .date = date,
-                                    .commit = std::string{commit}};
+                                    .commit = std::string{commit},
+                                    .env_var_name
+                                    = std::string(commit_env_var_name)};
                             }
 
                         return std::nullopt;
@@ -519,9 +607,10 @@ namespace
         std::string repo;
 
         bool is_tag = false;
-        for (int i = 0; auto const& seg : src_uri.encoded_segments())
+        for (int segment_pos_num = 0;
+             auto const& seg : src_uri.encoded_segments())
             {
-                switch (i)
+                switch (segment_pos_num)
                     {
                         case 0:
                             {
@@ -538,6 +627,9 @@ namespace
                                 if ("refs" == seg)
                                     {
                                         is_tag = true;
+                                        // this is a legitimate use of goto.
+                                        // stfu.
+                                        // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
                                         goto end_loop;
                                     }
                                 break;
@@ -545,7 +637,7 @@ namespace
                         default:
                             break;
                     };
-                ++i;
+                ++segment_pos_num;
             }
     end_loop:
         std::string feed_url = "https://github.com/" + workspace + "/" + repo;
@@ -606,19 +698,21 @@ namespace
                     = xml_entry.second.get_child("link.<xmlattr>.href");
                 boost::urls::url parsed_link{link_entry.data()};
                 LOG_DEBUG("Fetched url from: {}", parsed_link.c_str());
-                for (int i = 0;
+                for (int segment_num = 0;
                      auto const& seg : parsed_link.encoded_segments())
                     {
-                        LOG_TRACE_L1("{} seg: {}", i, std::string_view{seg});
-                        if (3 == i && ebuild_data.commit_specific.has_value())
+                        LOG_TRACE_L1("{} seg: {}", segment_num,
+                                     std::string_view{seg});
+                        if (3 == segment_num
+                            && ebuild_data.commit_specific.has_value())
                             {
                                 commit_version_or_tag = seg;
                             }
-                        if (4 == i)
+                        if (4 == segment_num)
                             {
                                 commit_version_or_tag = seg;
                             }
-                        ++i;
+                        ++segment_num;
                     }
                 LOG_TRACE_L1(
                     "is_tag: {}, is it commit type: {} commit_version_or_tag: "
@@ -641,17 +735,17 @@ namespace
                         std::chrono::sys_time<std::chrono::seconds>
                             time_from_epoch{};
 
-                        std::istringstream is{date_str};
+                        std::istringstream in_stream_for_parsing{date_str};
 
                         if (is_tag or ebuild_data.commit_specific.has_value())
                             {
-                                is >> std::chrono::parse("%Y-%m-%dT%H:%M:%SZ",
-                                                         time_from_epoch);
+                                in_stream_for_parsing >> std::chrono::parse(
+                                    "%Y-%m-%dT%H:%M:%SZ", time_from_epoch);
                             }
                         else
                             {
-                                is >> std::chrono::parse("%Y-%m-%dT%H:%M:%S%Ez",
-                                                         time_from_epoch);
+                                in_stream_for_parsing >> std::chrono::parse(
+                                    "%Y-%m-%dT%H:%M:%S%Ez", time_from_epoch);
                             }
 
                         LOG_TRACE_L1("Seconds: {}", time_from_epoch);
@@ -666,6 +760,10 @@ namespace
                                      static_cast<unsigned>(ymd.month()),
                                      static_cast<unsigned>(ymd.day()));
 
+                        // intention is to get a num that in decimal would look
+                        // like 'yyyymmdd', Plain dumb math and fucking explicit
+                        // casts to uint64_t.
+                        // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
                         new_date = static_cast<uint64_t>(
                                        (static_cast<int>(ymd.year()) * 10000))
                                    + (static_cast<uint64_t>(
@@ -673,6 +771,7 @@ namespace
                                       * 100)
                                    + static_cast<uint64_t>(
                                        static_cast<unsigned>(ymd.day()));
+                        // NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
                     }
                 // do it only once to get info only for latest entry.
                 break;
@@ -753,30 +852,45 @@ namespace
                     break;
             };
 
-        fetched_data.visit(overloads{
-            [&](CommitSpecific const& fetched) mutable
-                { LOG_DEBUG("Fetched: {} {}", fetched.date, fetched.commit); },
-            [&](std::string const& fetched)
-                { LOG_DEBUG("Fetched: {}", fetched); }});
+        fetched_data.visit(
+            overloads{[&](CommitSpecific const& fetched) mutable
+                          {
+                              LOG_DEBUG("Fetched: '{}' '{}'", fetched.date,
+                                        fetched.commit);
+                          },
+                      [&](std::string const& fetched)
+                          { LOG_DEBUG("Fetched: {}", fetched); }});
         co_return fetched_data;
     }
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct EditCommit
     {
+        std::string env_var_name;
         CommitSpecific old_ver;
         CommitSpecific new_ver;
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct EditVerOrTag
     {
         std::string old_ver;
         std::string new_ver;
     };
 
+    // NOLINTNEXTLINE(altera-struct-pack-align)
     struct InfoForDiff
     {
         std::filesystem::path path_to_ebuild;
         std::variant<EditCommit, EditVerOrTag> data_for_how_to_change;
+    };
+
+    // NOLINTNEXTLINE(altera-struct-pack-align)
+    struct PackagesToUpdate
+    {
+        std::vector<InfoForDiff> what_to_change;
+        bool is_any_successful = false;
+        bool is_any_failed = false;
     };
 
 /* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
@@ -808,8 +922,9 @@ namespace
 
         if (ebuild_data.commit_specific.has_value())
             {
-                LOG_DEBUG("Current date: '{}' commit: '{}'",
+                LOG_DEBUG("Current date: '{}' env_var: '{}' commit: '{}'",
                           ebuild_data.commit_specific.value().date,
+                          ebuild_data.commit_specific.value().env_var_name,
                           ebuild_data.commit_specific.value().commit);
             }
 
@@ -861,7 +976,16 @@ namespace
                         {
                             diff = {.data_for_how_to_change = EditCommit{
                                         .old_ver
-                                        = ebuild_data.commit_specific.value(),
+                                        = CommitSpecific{.date
+                                                         = ebuild_data
+                                                               .commit_specific
+                                                               .value()
+                                                               .date,
+                                                         .commit
+                                                         = ebuild_data
+                                                               .commit_specific
+                                                               .value()
+                                                               .commit},
                                         .new_ver = fetched}};
                         },
                     [&](std::string const& fetched) mutable
@@ -878,13 +1002,6 @@ namespace
 
         co_return std::nullopt;
     }
-
-    struct PackagesToUpdate
-    {
-        std::vector<InfoForDiff> what_to_change;
-        bool is_any_successful = false;
-        bool is_any_failed = false;
-    };
 
     [[nodiscard]] corral::Task<PackagesToUpdate> get_what_to_change(
         auto& ioc, Config const& cfg, auto& semaphores,
@@ -986,6 +1103,32 @@ namespace
             co_return corral::join;
         };
         co_return changes;
+    }
+
+    [[nodiscard]] corral::Task<std::expected<void, std::string>> apply_change(
+        auto& ioc, Config const& cfg, CommonContext& common_ctx,
+        std::filesystem::path const& where_to_change,
+        InfoForDiff const& diffInfo)
+    {
+        if (std::holds_alternative<EditCommit>(diffInfo.data_for_how_to_change))
+            {
+                // change commit in ebuild
+
+                // move the file to a file with new date. for now, just use
+                // std::filesystem::rename
+                co_return {};
+            }
+        else if (std::holds_alternative<EditVerOrTag>(
+                     diffInfo.data_for_how_to_change))
+            {
+                // move the file to new ver or tag. for now, just use
+                // std::filesystem::rename
+
+                co_return {};
+            }
+
+        co_return std::unexpected(
+            "Apparently, not all alternatives of InfoForDiffWereCovered");
     }
 
     [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
@@ -1106,7 +1249,7 @@ namespace
                   std::move(group_to_change_);
               });
 
-        std::filesystem::path temp_folder_worktrees
+        std::filesystem::path const temp_folder_worktrees
             = cfg.path_to_tmp / "worktrees";
         std::error_code errc_mkdir_p_worktrees;
         std::filesystem::create_directories(temp_folder_worktrees,
@@ -1119,6 +1262,28 @@ namespace
             };
         LOG_TRACE_L2("Created folder for worktrees.");
 
+        std::filesystem::path const path_to_git = __extension__({
+            auto smth = boost::process::environment::find_executable("git");
+            if (smth.empty())
+                {
+                    LOG_ERROR(
+                        "Failed to find 'git' executable in your environment.");
+                    co_return ReturnCode::FailedToFindGit;
+                }
+            std::filesystem::path(std::move(smth).native());
+        });
+
+        std::filesystem::path const path_to_gh = __extension__({
+            auto smth = boost::process::environment::find_executable("gh");
+            if (smth.empty())
+                {
+                    LOG_ERROR(
+                        "Failed to find 'gh' executable in your environment.");
+                    co_return ReturnCode::FailedToFindGh;
+                }
+            std::filesystem::path(std::move(smth).native());
+        });
+
         // logic for 0, i.e. no grouping
         auto range_grp_to_change_idx_no_grouping
             = group_to_change.equal_range(0);
@@ -1127,6 +1292,30 @@ namespace
              it_grp_to_chg_idx != range_grp_to_change_idx_no_grouping.second;
              ++it_grp_to_chg_idx)
             {
+                std::filesystem::path const path_to_ebuild
+                    = changes.what_to_change.at(it_grp_to_chg_idx->second)
+                          .path_to_ebuild;
+                std::string const base_name
+                    = path_to_ebuild.parent_path()
+                          .parent_path()
+                          .filename()
+                          .string()
+                      + path_to_ebuild.parent_path().filename().string();
+                std::filesystem::path const folder_path
+                    = temp_folder_worktrees / ("0_" + base_name);
+                std::string const branch_name = "ci_update/" + base_name;
+                auto res = co_await git_create_worktree(
+                    ioc, cfg, path_to_git, folder_path, branch_name);
+                if (not res)
+                    {
+                        LOG_ERROR("Failed to create a git worktree: {}",
+                                  std::move(res.error()));
+                        co_return ReturnCode::FailedMakingGitToMakeWorktrees;
+                    }
+
+                // make changes
+
+                // gh
             }
 
         // logic for groups
@@ -1257,6 +1446,9 @@ int main(int argc, char* argv[])
                        "tracel3,tracel2,tracel1,debug,info,notice,warning,"
                        "error,critical")
             ->default_val("info");
+        app.add_option("--main-branch-name", cfg.main_branch_name,
+                       "Main branch name of the repo ")
+            ->default_val("master");
 
         app.add_option("-J,--jobs-requests", cfg.concurrency_per_service,
                        "Amount of concurrent request per service"
@@ -1266,6 +1458,15 @@ int main(int argc, char* argv[])
         try
             {
                 app.parse(argc, argv);
+
+                auto const path_to_ebuild_sh
+                    = cfg.path_to_portage_bin / "ebuild.sh";
+                if (not std::filesystem::exists(path_to_ebuild_sh))
+                    {
+                        throw OmegaException<std::filesystem::path>(
+                            "An expected executable does not exists.",
+                            path_to_ebuild_sh);
+                    }
 
                 cfg.log_level = quill::loglevel_from_string(log_level_str);
 
@@ -1285,6 +1486,38 @@ int main(int argc, char* argv[])
         catch (const CLI::ParseError& e)
             {
                 return app.exit(e);
+            }
+        catch (OmegaException<std::filesystem::path>& e)
+            {
+                boost::stacktrace::basic_stacktrace<
+                    std::allocator<boost::stacktrace::frame>>
+                    trace
+                    = boost::stacktrace::stacktrace::from_current_exception();
+                std::string log = fmt::format(
+                    R"(Oohh, look at you, who got an exception, my cutie lovely guy. 
+This is an Omega exception. Most definitely an incorrect value was specified in command line args, specifically a file path to something. 
+
+Here's .what():
+{}
+
+Here's data:
+{}
+
+Here's trace:
+{}
+
+Here's line where something failed:
+{}
+
+Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
+{}
+)",
+                    e.what(), e.data(), e.stack(), e.where(),
+                    boost::stacktrace::to_string(trace));
+
+                fmt::print(std::cerr, "{}", log);
+                return std::to_underlying(
+                    ReturnCode::FailSpecifiedValueIsIncorrect);
             }
         catch (OmegaException<std::string>& e)
             {
