@@ -69,8 +69,28 @@ Finally run the project:
             - `git worktree add -b branch_test/worktree ./test_worktree master`
         - [x] applying changes
             - [x] applying changes in groups
-        - [ ] creating MR, while cwd in a specific worktree. `gh` for now
-            - [ ] how to check whether PR already exist?
+        - [ ] pr logic
+            - [ ] check if branch with same name exists on remote
+                - [ ] if yes, check if only one commit is different to master
+                    - [ ] if yes
+                        - [ ] check whether the diff is same
+                            - only file diff, not commit messages
+                            - [ ] if no, proceed with force pushing
+                    - [ ] check whether current branch is behind last commit on master
+                        - [ ] if so, check whether there is merge conflict
+                            - [ ] if exists, force push new version
+                        - [ ] if so, check whether any file in `.github/` or `groups-ci.json` is lagging behind master.
+                            - [ ] if so, force push new version
+                - [ ] if no, proceed with pushing and creating a PR
+            - [ ] cleanup dead PRs
+                - Why?
+                    - the `groups-ci.json` can be changed in a way that first element is another one
+                    - a package has been updated through a manual PR, and new PR is unnecessary
+                    - a package is deleted
+                    - the grouping in `groups-ci.json` can be changed completely
+                - [ ] get list of all branches, filter those that start with `ci_update/`
+                - [ ] check whether all of them are relevant to current situation
+
 - [ ] maintenance
     - [ ] improve warm compile time
         - [ ] find out how to get statistics of on what code it wastes most of the time
