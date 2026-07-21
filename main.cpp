@@ -1286,47 +1286,10 @@ namespace
             "Apparently, not all alternatives of InfoForDiffWereCovered");
     }
 
-    [[nodiscard]] corral::Task<ReturnCode> chief_logic(auto& ioc,
-                                                       Config const& cfg,
-                                                       auto& semaphores)
+    [[nodiscard]] corral::Task<ReturnCode> chief_logic(
+        auto& ioc, Config const& cfg, auto& semaphores,
+        CommonContext& common_ctx)
     {
-        // to compile them all at once
-        // NOLINTBEGIN(hicpp-signed-bitwise)
-        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
-            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
-            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
-        // NOLINTEND(hicpp-signed-bitwise)
-
-        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
-            str_re_versions);
-
-        CommonContext common_ctx{
-            .re_commit_str = RE2(
-                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
-                RE2::Quiet),
-            .re_src_uri = RE2(
-                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
-                RE2::Quiet),
-
-            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
-            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
-
-            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
-            .re_set_services = std::invoke(
-                []()
-                    {
-                        RE2::Set re_set_services(RE2::DefaultOptions,
-                                                 RE2::Anchor::UNANCHORED);
-                        for (auto&& service : ServicesNames)
-                            {
-                                re_set_services.Add(service, nullptr);
-                            }
-                        re_set_services.Compile();
-                        return std::move(re_set_services);
-                    }),
-            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
-        };
-
         PackagesToUpdate const changes
             = co_await get_what_to_change(ioc, cfg, semaphores, common_ctx);
 
@@ -1547,11 +1510,84 @@ namespace
                 {
                     auto range_grp_to_change_idx
                         = group_to_change.equal_range(group_num);
-                    for (auto it_grp_to_chg_idx = range_grp_to_change_idx.first;
-                         it_grp_to_chg_idx != range_grp_to_change_idx.second;
-                         ++it_grp_to_chg_idx)
-                        {
-                        }
+
+                    std::filesystem::path const path_to_ebuild
+                        = changes.what_to_change
+                              .at(range_grp_to_change_idx.first->second)
+                              .path_to_ebuild;
+                    std::string const base_name
+                        = path_to_ebuild.parent_path()
+                              .parent_path()
+                              .filename()
+                              .string()
+                          + path_to_ebuild.parent_path().filename().string();
+                    std::filesystem::path const folder_path
+                        = temp_folder_worktrees
+                          / (fmt::format("{}_", group_num) + base_name);
+                    std::string const branch_name = "ci_update/" + base_name;
+
+                    // NOLINTBEGIN(cppcoreguidelines-avoid-capturing-lambda-coroutines)
+                    nursery.start(
+                        [&, folder_path = folder_path,
+                         branch_name = branch_name,
+                         range_grp_to_change_idx
+                         = range_grp_to_change_idx]() -> corral::Task<void>
+                            {
+                                {
+                                    auto res = co_await git_create_worktree(
+                                        ioc, cfg, path_to_git, folder_path,
+                                        branch_name);
+                                    if (not res)
+                                        {
+                                            LOG_ERROR(
+                                                "Failed to create a git "
+                                                "worktree: "
+                                                "{}",
+                                                std::move(res.error()));
+                                            return_code = ReturnCode::
+                                                FailedMakingGitToMakeWorktrees;
+                                            nursery.cancel();
+                                            co_return;
+                                        }
+                                }
+
+                                for (auto it_grp_to_chg_idx
+                                     = range_grp_to_change_idx.first;
+                                     it_grp_to_chg_idx
+                                     != range_grp_to_change_idx.second;
+                                     ++it_grp_to_chg_idx)
+                                    {
+                                        nursery.start(
+                                            [&, folder_path = folder_path,
+                                             chg_idx
+                                             = it_grp_to_chg_idx->second]()
+                                                -> corral::Task<void>
+                                                {
+                                                    auto res
+                                                        = co_await apply_change(
+                                                            ioc, folder_path,
+                                                            changes
+                                                                .what_to_change
+                                                                .at(chg_idx));
+                                                    if (not res)
+                                                        {
+                                                            LOG_ERROR(
+                                                                "Failed to "
+                                                                "apply "
+                                                                "changes: "
+                                                                "{}",
+                                                                std::move(
+                                                                    res.error()));
+                                                            return_code
+                                                                = ReturnCode::
+                                                                    FailedApplyChange;
+                                                            nursery.cancel();
+                                                            co_return;
+                                                        }
+                                                });
+                                    }
+                            });
+                    // NOLINTEND(cppcoreguidelines-avoid-capturing-lambda-coroutines)
                 }
 
             co_return corral::join;
@@ -1591,8 +1627,45 @@ namespace
                 [concurrency_per_service = cfg.concurrency_per_service]()
                     { return corral::Semaphore(concurrency_per_service); });
 
-        ReturnCode res
-            = co_await chief_logic(ioc, cfg, semaphores_per_services);
+        // to compile them all at once
+        // NOLINTBEGIN(hicpp-signed-bitwise)
+        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
+            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
+            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
+        // NOLINTEND(hicpp-signed-bitwise)
+
+        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
+            str_re_versions);
+
+        CommonContext common_ctx{
+            .re_commit_str = RE2(
+                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
+                RE2::Quiet),
+            .re_src_uri = RE2(
+                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
+                RE2::Quiet),
+
+            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
+            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
+
+            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
+            .re_set_services = std::invoke(
+                []()
+                    {
+                        RE2::Set re_set_services(RE2::DefaultOptions,
+                                                 RE2::Anchor::UNANCHORED);
+                        for (auto&& service : ServicesNames)
+                            {
+                                re_set_services.Add(service, nullptr);
+                            }
+                        re_set_services.Compile();
+                        return std::move(re_set_services);
+                    }),
+            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
+        };
+
+        ReturnCode res = co_await chief_logic(ioc, cfg, semaphores_per_services,
+                                              common_ctx);
         co_return res;
     }
 
