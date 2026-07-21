@@ -67,8 +67,9 @@ Finally run the project:
         - [x] new folder in tmp for worktrees
         - [x] creating new branch and the new worktree for it
             - `git worktree add -b branch_test/worktree ./test_worktree master`
-        - [x] applying changes
+        - [ ] applying changes
             - [x] applying changes in groups
+            - [ ] manifest update for changes that are version-like
         - [ ] pr logic
             - [ ] check if branch with same name exists on remote
                 - [ ] if yes, check if only one commit is different to master
