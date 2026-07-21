@@ -1,7 +1,8 @@
-#include <boost/process/v2/start_dir.hpp>
 #define BOOST_STACKTRACE_USE_BACKTRACE 1
 #define BOOST_ASIO_HAS_FILE 1
 #define BOOST_ASIO_HAS_IO_URING 1
+#define BOOST_PROCESS_V2_DISABLE_NOTIFY_FORK 1
+#define BOOST_PROCESS_USE_STD_FS 1
 #include <array>
 #include <chrono>
 #include <expected>
@@ -35,6 +36,7 @@
 #include <boost/date_time.hpp>
 #include <boost/process.hpp>
 #include <boost/process/v2/environment.hpp>
+#include <boost/process/v2/start_dir.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ptree_fwd.hpp>
 #include <boost/property_tree/xml_parser.hpp>
@@ -73,6 +75,7 @@
 #include "gyou/http_requests.hpp"
 #include "gyou/omega_exception.hpp"
 #include "gyou/parsing_groupsci.hpp"
+#include "gyou/string_replace.hpp"
 #include "gyou/variants_utils.hpp"
 #include "overwrite_log_macros.h"
 #include "quill_static.h"
@@ -198,7 +201,8 @@ namespace
         FailedToFindGit = 14,
         FailedToFindGh = 15,
         FailedMakingGitToMakeWorktrees = 16,
-        FailedGhIsNotLoggedIn = 17,
+        FailedApplyChange = 17,
+        FailedGhIsNotLoggedIn = 18,
 
     };
 
@@ -261,6 +265,13 @@ namespace
         std::expected<std::string, boost::system::error_code>>
     file_to_string(auto& ioc, std::filesystem::path const& file_path)
     {
+        if (not std::filesystem::exists(file_path))
+            {
+                throw OmegaException<std::filesystem::path>(
+                    "It was requested to read a file into a string on heap "
+                    "asynchronously, but the file just simply does not exist.",
+                    file_path);
+            }
         boost::asio::stream_file file_reader(
             ioc, file_path, boost::asio::stream_file::read_only);
 
@@ -280,8 +291,8 @@ namespace
     [[nodiscard]] corral::Task<std::expected<void, std::string>>
     git_create_worktree(auto& ioc, Config const& cfg,
                         std::filesystem::path const& path_to_git,
-                        std::filesystem::path const& folder_path,
-                        std::string const& branch_name)
+                        std::filesystem::path const folder_path,
+                        std::string const branch_name)
     {
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
@@ -329,19 +340,10 @@ namespace
 
     [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
     gh_create_pr(auto& ioc, Config const& cfg,
+                 std::filesystem::path const& path_to_gh,
                  std::filesystem::path const& folder_path,
                  std::string const& branch_name)
     {
-        std::filesystem::path const path_to_gh = __extension__({
-            auto smth = boost::process::environment::find_executable("gh");
-            if (smth.empty())
-                {
-                    co_return std::unexpected(
-                        "Failed to find 'gh' executable in your environment.");
-                }
-            std::filesystem::path(std::move(smth).native());
-        });
-
         // check if authorized in any account via `gh auth status` and regex
         // `Logged in to github.com account`
 
@@ -975,6 +977,9 @@ namespace
                     [&](CommitSpecific const& fetched) mutable
                         {
                             diff = {.data_for_how_to_change = EditCommit{
+                                        .env_var_name
+                                        = ebuild_data.commit_specific.value()
+                                              .env_var_name,
                                         .old_ver
                                         = CommitSpecific{.date
                                                          = ebuild_data
@@ -1107,10 +1112,13 @@ namespace
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>> apply_change(
         auto& ioc, Config const& cfg, CommonContext& common_ctx,
-        std::filesystem::path const& where_to_change,
-        InfoForDiff const& diffInfo)
+        std::filesystem::path const where_to_change,
+        InfoForDiff const& diff_info)
     {
-        if (std::holds_alternative<EditCommit>(diffInfo.data_for_how_to_change))
+        LOG_INFO("Trying to apply a change for next ebuild: {}",
+                 diff_info.path_to_ebuild);
+        if (std::holds_alternative<EditCommit>(
+                diff_info.data_for_how_to_change))
             {
                 // change commit in ebuild
 
@@ -1119,10 +1127,41 @@ namespace
                 co_return {};
             }
         else if (std::holds_alternative<EditVerOrTag>(
-                     diffInfo.data_for_how_to_change))
+                     diff_info.data_for_how_to_change))
             {
                 // move the file to new ver or tag. for now, just use
                 // std::filesystem::rename
+
+                auto const& diff_details
+                    = std::get<EditVerOrTag>(diff_info.data_for_how_to_change);
+
+                std::string const new_name = gyou::Replace(
+                    diff_info.path_to_ebuild.filename().string(),
+                    diff_details.old_ver, diff_details.new_ver);
+
+                std::filesystem::path const path_base
+                    = where_to_change
+                      / (diff_info.path_to_ebuild.parent_path()
+                             .parent_path()
+                             .filename())
+                      / diff_info.path_to_ebuild.parent_path().filename();
+
+                std::filesystem::path const old_path
+                    = path_base / diff_info.path_to_ebuild.filename();
+                std::filesystem::path const new_path = path_base / new_name;
+
+                // this probably should be recoded via async rename via liburing
+                // or whatever
+                std::error_code errc;
+                std::filesystem::rename(old_path, new_path, errc);
+                if (errc)
+                    {
+                        co_return std::unexpected(
+                            fmt::format("During applying changes, failed to "
+                                        "rename a file from '{}' to "
+                                        "'{}'. errc,message: '{}'",
+                                        old_path, new_path, errc.message()));
+                    };
 
                 co_return {};
             }
@@ -1174,6 +1213,32 @@ namespace
 
         PackagesToUpdate const changes
             = co_await get_what_to_change(ioc, cfg, semaphores, common_ctx);
+
+        for (auto const& diff : changes.what_to_change)
+            {
+                if (std::holds_alternative<EditCommit>(
+                        diff.data_for_how_to_change))
+                    {
+                        EditCommit commits_diff
+                            = std::get<EditCommit>(diff.data_for_how_to_change);
+                        LOG_INFO(
+                            "Edit: path: '{}' old date: '{}' new date: '{}' "
+                            "old commit: '{}' new commit: '{}'",
+                            diff.path_to_ebuild, commits_diff.old_ver.date,
+                            commits_diff.new_ver.date,
+                            commits_diff.old_ver.commit,
+                            commits_diff.new_ver.commit);
+                    }
+                else if (std::holds_alternative<EditVerOrTag>(
+                             diff.data_for_how_to_change))
+                    {
+                        EditVerOrTag commits_diff = std::get<EditVerOrTag>(
+                            diff.data_for_how_to_change);
+                        LOG_INFO("Edit: path: '{}' old ver: '{}' new ver: '{}'",
+                                 diff.path_to_ebuild, commits_diff.old_ver,
+                                 commits_diff.new_ver);
+                    }
+            }
 
         std::filesystem::path const path_to_grouping
             = cfg.path_to_repo / "groups-ci.json";
@@ -1263,99 +1328,122 @@ namespace
         LOG_TRACE_L2("Created folder for worktrees.");
 
         std::filesystem::path const path_to_git = __extension__({
-            auto smth = boost::process::environment::find_executable("git");
-            if (smth.empty())
+            auto path_to_git_
+                = boost::process::environment::find_executable("git");
+            if (path_to_git_.empty())
                 {
                     LOG_ERROR(
                         "Failed to find 'git' executable in your environment.");
                     co_return ReturnCode::FailedToFindGit;
                 }
-            std::filesystem::path(std::move(smth).native());
+            path_to_git_;
         });
 
         std::filesystem::path const path_to_gh = __extension__({
-            auto smth = boost::process::environment::find_executable("gh");
-            if (smth.empty())
+            auto path_to_gh_
+                = boost::process::environment::find_executable("gh");
+            if (path_to_gh_.empty())
                 {
                     LOG_ERROR(
                         "Failed to find 'gh' executable in your environment.");
                     co_return ReturnCode::FailedToFindGh;
                 }
-            std::filesystem::path(std::move(smth).native());
+            path_to_gh_;
         });
 
-        // logic for 0, i.e. no grouping
-        auto range_grp_to_change_idx_no_grouping
-            = group_to_change.equal_range(0);
+        std::optional<ReturnCode> return_code;
+        CORRAL_WITH_NURSERY(nursery)
+        {
+            // logic for 0, i.e. no grouping
+            auto range_grp_to_change_idx_no_grouping
+                = group_to_change.equal_range(0);
+            for (auto it_grp_to_chg_idx
+                 = range_grp_to_change_idx_no_grouping.first;
+                 it_grp_to_chg_idx
+                 != range_grp_to_change_idx_no_grouping.second;
+                 ++it_grp_to_chg_idx)
+                {
+                    std::filesystem::path const path_to_ebuild
+                        = changes.what_to_change.at(it_grp_to_chg_idx->second)
+                              .path_to_ebuild;
+                    std::string const base_name
+                        = path_to_ebuild.parent_path()
+                              .parent_path()
+                              .filename()
+                              .string()
+                          + path_to_ebuild.parent_path().filename().string();
+                    std::filesystem::path const folder_path
+                        = temp_folder_worktrees / ("0_" + base_name);
+                    std::string const branch_name = "ci_update/" + base_name;
 
-        for (auto it_grp_to_chg_idx = range_grp_to_change_idx_no_grouping.first;
-             it_grp_to_chg_idx != range_grp_to_change_idx_no_grouping.second;
-             ++it_grp_to_chg_idx)
+                    // NOLINTBEGIN(cppcoreguidelines-avoid-capturing-lambda-coroutines)
+                    nursery.start(
+                        [&, folder_path = folder_path,
+                         branch_name = branch_name,
+                         chg_idx
+                         = it_grp_to_chg_idx->second]() -> corral::Task<void>
+                            {
+                                {
+                                    auto res = co_await git_create_worktree(
+                                        ioc, cfg, path_to_git, folder_path,
+                                        branch_name);
+                                    if (not res)
+                                        {
+                                            LOG_ERROR(
+                                                "Failed to create a git "
+                                                "worktree: "
+                                                "{}",
+                                                std::move(res.error()));
+                                            return_code = ReturnCode::
+                                                FailedMakingGitToMakeWorktrees;
+                                            nursery.cancel();
+                                            co_return;
+                                        }
+                                }
+                                // make changes
+
+                                {
+                                    auto res = co_await apply_change(
+                                        ioc, cfg, common_ctx, folder_path,
+                                        changes.what_to_change.at(chg_idx));
+                                    if (not res)
+                                        {
+                                            LOG_ERROR(
+                                                "Failed to apply changes: "
+                                                "{}",
+                                                std::move(res.error()));
+                                            return_code
+                                                = ReturnCode::FailedApplyChange;
+                                            nursery.cancel();
+                                            co_return;
+                                        }
+                                }
+
+                                // gh
+                            });
+                    // NOLINTEND(cppcoreguidelines-avoid-capturing-lambda-coroutines)
+                }
+
+            // logic for groups
+
+            for (size_t group_num = 1; group_num < groups.amount_of_groups + 1;
+                 ++group_num)
+                {
+                    auto range_grp_to_change_idx
+                        = group_to_change.equal_range(group_num);
+                    for (auto it_grp_to_chg_idx = range_grp_to_change_idx.first;
+                         it_grp_to_chg_idx != range_grp_to_change_idx.second;
+                         ++it_grp_to_chg_idx)
+                        {
+                        }
+                }
+
+            co_return corral::join;
+        };
+
+        if (return_code.has_value())
             {
-                std::filesystem::path const path_to_ebuild
-                    = changes.what_to_change.at(it_grp_to_chg_idx->second)
-                          .path_to_ebuild;
-                std::string const base_name
-                    = path_to_ebuild.parent_path()
-                          .parent_path()
-                          .filename()
-                          .string()
-                      + path_to_ebuild.parent_path().filename().string();
-                std::filesystem::path const folder_path
-                    = temp_folder_worktrees / ("0_" + base_name);
-                std::string const branch_name = "ci_update/" + base_name;
-                auto res = co_await git_create_worktree(
-                    ioc, cfg, path_to_git, folder_path, branch_name);
-                if (not res)
-                    {
-                        LOG_ERROR("Failed to create a git worktree: {}",
-                                  std::move(res.error()));
-                        co_return ReturnCode::FailedMakingGitToMakeWorktrees;
-                    }
-
-                // make changes
-
-                // gh
-            }
-
-        // logic for groups
-
-        for (size_t group_num = 1; group_num < groups.amount_of_groups + 1;
-             ++group_num)
-            {
-                auto range_grp_to_change_idx
-                    = group_to_change.equal_range(group_num);
-                for (auto it_grp_to_chg_idx = range_grp_to_change_idx.first;
-                     it_grp_to_chg_idx != range_grp_to_change_idx.second;
-                     ++it_grp_to_chg_idx)
-                    {
-                    }
-            }
-
-        for (auto const& diff : changes.what_to_change)
-            {
-                if (std::holds_alternative<EditCommit>(
-                        diff.data_for_how_to_change))
-                    {
-                        EditCommit commits_diff
-                            = std::get<EditCommit>(diff.data_for_how_to_change);
-                        LOG_INFO(
-                            "Edit: path: '{}' old date: '{}' new date: '{}' "
-                            "old commit: '{}' new commit: '{}'",
-                            diff.path_to_ebuild, commits_diff.old_ver.date,
-                            commits_diff.new_ver.date,
-                            commits_diff.old_ver.commit,
-                            commits_diff.new_ver.commit);
-                    }
-                else if (std::holds_alternative<EditVerOrTag>(
-                             diff.data_for_how_to_change))
-                    {
-                        EditVerOrTag commits_diff = std::get<EditVerOrTag>(
-                            diff.data_for_how_to_change);
-                        LOG_INFO("Edit: path: '{}' old ver: '{}' new ver: '{}'",
-                                 diff.path_to_ebuild, commits_diff.old_ver,
-                                 commits_diff.new_ver);
-                    }
+                co_return return_code.value();
             }
 
         if (changes.is_any_failed and changes.is_any_successful)

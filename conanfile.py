@@ -8,11 +8,14 @@ class CompressorRecipe(ConanFile):
     def configure(self):
         self.options["boost"].with_stacktrace = True
         self.options["boost"].without_url = False
+        self.options["boost"].without_cobalt = True
+        self.options["boost"].filesystem_use_std_fs = True
+
 
     def requirements(self):
         self.requires("corral/[~0]")
         self.requires("openssl/[~3]")
-        self.requires("boost/[>=1.88.0 <1.90.0]")
+        self.requires("boost/[>=1.88.0]")
         # self.requires("gtest/[~1]")
         self.requires("fmt/[~12]")
         self.requires("cli11/[~2]")
