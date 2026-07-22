@@ -1,4 +1,4 @@
-#include "quill_static.h"
+#include "quill_static.hpp"
 
 #include <quill/core/LogLevel.h>
 

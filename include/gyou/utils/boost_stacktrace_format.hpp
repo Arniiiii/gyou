@@ -5,8 +5,10 @@
 #include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <fmt/std.h>
 #include <quill/DeferredFormatCodec.h>
 #include <quill/bundled/fmt/ranges.h>
+#include <quill/bundled/fmt/std.h>
 
 template <> struct fmt::formatter<boost::stacktrace::frame, char>
 {

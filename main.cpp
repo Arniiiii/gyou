@@ -1,8 +1,3 @@
-#define BOOST_STACKTRACE_USE_BACKTRACE 1
-#define BOOST_ASIO_HAS_FILE 1
-#define BOOST_ASIO_HAS_IO_URING 1
-#define BOOST_PROCESS_V2_DISABLE_NOTIFY_FORK 1
-#define BOOST_PROCESS_USE_STD_FS 1
 #include <array>
 #include <chrono>
 #include <expected>
@@ -71,301 +66,40 @@
 #include <re2/set.h>
 #include <reflex/pcre2matcher.h>
 
-#include "gyou/array_utils.hpp"
-#include "gyou/boost_stacktrace_format.hpp"  // IWYU pragma: keep
+#include "gyou/bash_ebuild.hpp"
+#include "gyou/file_to_string.hpp"
+#include "gyou/get_latest_updates.hpp"
+#include "gyou/git_worktree.hpp"
 #include "gyou/http_requests.hpp"
-#include "gyou/omega_exception.hpp"
+#include "gyou/parse_ebuild.hpp"
 #include "gyou/parsing_groupsci.hpp"
-#include "gyou/string_replace.hpp"
-#include "gyou/variants_utils.hpp"
-#include "overwrite_log_macros.h"
-#include "quill_static.h"
-
-// it is for getting real type from compiler when debugging via
-// `Debug<a_type_i_dont_know_and_i_want_understand> sth;`
-template <typename T> struct Debug;
+#include "gyou/rss_parse_into_tree.hpp"
+#include "gyou/string_to_file.hpp"
+#include "gyou/structs/change_related/commit_specific.hpp"
+#include "gyou/structs/change_related/pkg_type.hpp"
+#include "gyou/structs/common_ctx.hpp"
+#include "gyou/structs/config.hpp"
+#include "gyou/structs/consts.hpp"
+#include "gyou/structs/ebuild_commit_specific.hpp"
+#include "gyou/structs/ebuild_parsed_data.hpp"
+#include "gyou/structs/return_code.hpp"
+#include "gyou/structs/rss/most_cases.hpp"
+#include "gyou/structs/service_enum.hpp"
+#include "gyou/structs/service_regex.hpp"
+#include "gyou/utils/array_utils.hpp"
+#include "gyou/utils/boost_stacktrace_format.hpp"  // IWYU pragma: keep
+#include "gyou/utils/omega_exception.hpp"
+#include "gyou/utils/rusty_macros.hpp"
+#include "gyou/utils/string_replace.hpp"
+#include "gyou/utils/variants_utils.hpp"
+#include "overwrite_log_macros.hpp"
+#include "quill_static.hpp"
 
 namespace
 {
 
-    constexpr size_t DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE = 6;
-
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class Service : size_t
-    {
-        github = 0,
-        gitlab = 1,
-        bitbucket = 2,
-        codeberg = 3,
-        cpan = 4,
-        cpan_module = 5,
-        cpe = 6,
-        cran = 7,
-        ctan = 8,
-        freedesktop_gitlab = 9,
-        gentoo = 10,
-        gnome_gitlab = 11,
-        google_code = 12,
-        hackage = 13,
-        heptapod = 14,
-        kde_invent = 15,
-        launchpad = 16,
-        osdn = 17,
-        pear = 18,
-        pecl = 19,
-        pypi = 20,
-        rubygems = 21,
-        savannah = 22,
-        savannah_nongnu = 23,
-        sourceforge = 24,
-        sourcehut = 25,
-        vim = 26,
-    };
-
-    // Fucking C++ without C99 designated array initializer extension makes me
-    // do this shit.
-    constexpr auto ServicesNames
-        = ArrayBuilder<std::string_view>()
-              .e<Service::bitbucket>("https://bitbucket.org/.*?")
-              .e<Service::codeberg>("https://codeberg.org/.*?")
-              .e<Service::cpan>("https://metacpan.org/dist/.*?")
-              .e<Service::cpan_module>("https://metacpan.org/pod/.*?")
-              .e<Service::cpe>("cpe:/.*?")
-              .e<Service::cran>("https://cran.r-project.org/web/packages/.*?")
-              .e<Service::ctan>("https://ctan.org/pkg/.*?")
-              .e<Service::freedesktop_gitlab>(
-                  "https://gitlab.freedesktop.org/.*?")
-              .e<Service::gentoo>("https://gitweb.gentoo.org/.*?")
-              .e<Service::github>("https://github.com/.*?")
-              .e<Service::gitlab>("https://gitlab.com/.*?")
-              .e<Service::gnome_gitlab>("https://gitlab.gnome.org/.*?")
-              .e<Service::google_code>("https://code.google.com/archive/p/.*?")
-              .e<Service::hackage>("https://hackage.haskell.org/package/.*?")
-              .e<Service::heptapod>("https://foss.heptapod.net/.*?")
-              .e<Service::kde_invent>("https://invent.kde.org/.*?")
-              .e<Service::launchpad>("https://launchpad.net/.*?")
-              .e<Service::osdn>("https://osdn.net/projects/.*?/")
-              .e<Service::pear>("https://pear.php.net/package/.*?")
-              .e<Service::pecl>("https://pecl.php.net/package/.*?")
-              .e<Service::pypi>("https://pypi.org/project/.*?/")
-              .e<Service::rubygems>("https://rubygems.org/gems/.*?")
-              .e<Service::savannah>("https://savannah.gnu.org/projects/.*?")
-              .e<Service::savannah_nongnu>(
-                  "https://savannah.nongnu.org/projects/.*?")
-              .e<Service::sourceforge>("https://sourceforge.net/projects/.*?")
-              .e<Service::sourcehut>("https://sr.ht/.*?")
-              .e<Service::vim>(
-                  "https://www.vim.org/scripts/script.php?script_id=.*?")
-              .build();
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct Config
-    {
-        boost::beast::http::fields headers;
-        std::filesystem::path log_file;
-        std::filesystem::path path_to_repo;
-        std::filesystem::path path_to_portage_bin;
-        std::filesystem::path path_to_tmp;
-        std::filesystem::path path_to_portage_pym;
-        std::filesystem::path path_to_gentoo_repo;
-        std::string main_branch_name;
-        size_t concurrency_per_service{};
-        quill::LogLevel log_level{};
-    };
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct EntryData
-    {
-        std::string link_str;
-        std::string author;
-        std::string title;
-        std::string description;
-    };
-
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class ReturnCode : int
-    {
-        Success = 0,
-        PartialSuccess = 1,
-        AllHaveFailed = 2,
-        NoEbuildFound = 3,
-        FailDuringParsingCmdValues = 4,
-        FailSpecifiedValueIsIncorrect = 5,
-        FailDuringInitializationConfig = 6,
-        FailStandardException = 7,
-        FailParsePromptResult = 8,
-        FailInitializationLogger = 9,
-        ReceivedCancellationSignal = 10,
-        FailedReadingGroupCiFile = 11,
-        FailedParsingGroupCiFile = 12,
-        FailedCreateDirTmpWorktrees = 13,
-        FailedToFindGit = 14,
-        FailedToFindGh = 15,
-        FailedMakingGitToMakeWorktrees = 16,
-        FailedApplyChange = 17,
-        FailedGhIsNotLoggedIn = 18,
-
-    };
-
-    enum class PackageType : std::uint8_t
-    {
-        Unknown,
-        ReleaseOrTag,
-        Commit,
-    };
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct CommonContext
-    {
-        RE2 re_commit_str;
-        RE2 re_src_uri;
-        RE2 re_category;
-        RE2 re_pkg_9999;
-        RE2 re_pkg_with_date;
-        RE2::Set re_set_services;
-        reflex::PCRE2UTFMatcher re_version_matcher;
-    };
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct CommitSpecific
-    {
-        uint64_t date{};
-        std::string commit;
-    };
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct EbuildCommitSpecific
-    {
-        uint64_t date{};
-        std::string commit;
-        std::string env_var_name;
-    };
-
-    // NOLINTNEXTLINE(altera-struct-pack-align)
-    struct EbuildSpecificData
-    {
-        std::filesystem::path filepath;
-        std::string p;
-        std::string pv;
-        std::string pn;
-        std::string category;
-        std::string first_uri;
-        std::optional<EbuildCommitSpecific> commit_specific;
-        Service service{};
-    };
-
-    boost::property_tree::ptree parse_rss_into_tree(std::string const& rss_feed)
-    {
-        boost::property_tree::ptree tree;
-        std::istringstream istr(rss_feed);
-        boost::property_tree::read_xml(istr, tree);
-        return tree;
-    }
-
-    [[nodiscard]] corral::Task<
-        std::expected<std::string, boost::system::error_code>>
-    file_to_string(auto& ioc, std::filesystem::path const& file_path)
-    {
-        if (not std::filesystem::exists(file_path))
-            {
-                throw OmegaException<std::filesystem::path>(
-                    "It was requested to read a file into a string on heap "
-                    "asynchronously, but the file just simply does not exist.",
-                    file_path);
-            }
-        boost::asio::stream_file file_reader(
-            ioc, file_path, boost::asio::stream_file::read_only);
-
-        std::string str_of_file;
-        str_of_file.reserve(file_reader.size());
-
-        auto&& [errc, bytes_read] = co_await boost::asio::async_read(
-            file_reader, boost::asio::dynamic_buffer(str_of_file),
-            corral::asio_nothrow_awaitable);
-        if (errc && boost::asio::error::eof != errc)
-            {
-                co_return std::unexpected(errc);
-            }
-        co_return str_of_file;
-    }
-
-    [[nodiscard]] corral::Task<std::expected<void, boost::system::error_code>>
-    string_to_file(auto& ioc, std::string const& content,
-                   std::filesystem::path const& file_path)
-    {
-        if (not std::filesystem::exists(file_path))
-            {
-                throw OmegaException<std::filesystem::path>(
-                    "It was requested to write a string into a file "
-                    "asynchronously, but the file already exists. Refusing to "
-                    "rewrite a file.",
-                    file_path);
-            }
-        boost::asio::stream_file file_writer(
-            ioc, file_path, boost::asio::stream_file::write_only);
-
-        auto&& [errc, bytes_read] = co_await boost::asio::async_write(
-            file_writer, boost::asio::buffer(content),
-            corral::asio_nothrow_awaitable);
-        if (errc && boost::asio::error::eof != errc)
-            {
-                co_return std::unexpected(errc);
-            }
-        co_return {};
-    }
-
-    [[nodiscard]] corral::Task<std::expected<void, std::string>>
-    git_create_worktree(auto& ioc, Config const& cfg,
-                        std::filesystem::path const& path_to_git,
-                        std::filesystem::path const folder_path,
-                        std::string const branch_name)
-    {
-        boost::asio::readable_pipe rp_stdout{ioc};
-        boost::asio::readable_pipe rp_stderr{ioc};
-
-        LOG_DEBUG("Presumably running next command: '{}'",
-                  fmt::format("{} worktree add -b {} {} {}", path_to_git,
-                              branch_name, folder_path, cfg.main_branch_name));
-
-        auto proc = boost::process::process(
-            ioc, path_to_git.string(),
-            {"worktree", "add", "-b", branch_name, folder_path.string(),
-             cfg.main_branch_name},
-            boost::process::process_stdio{.in = {/* in to default */},
-                                          .out = rp_stdout,
-                                          .err = rp_stderr},
-            boost::process::process_start_dir(cfg.path_to_repo.string()));
-
-        LOG_DEBUG("Waiting until git does it job, probably");
-
-        std::string stdout_s;
-        std::string stderr_s;
-
-        auto [proc_tuple, _, _] = co_await corral::allOf(
-            proc.async_wait(corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stdout,
-                                    boost::asio::dynamic_buffer(stdout_s),
-                                    corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stderr,
-                                    boost::asio::dynamic_buffer(stderr_s),
-                                    corral::asio_nothrow_awaitable));
-        auto&& [_, errc_proc] = proc_tuple;
-
-        if (errc_proc != 0)
-            {
-                co_return std::unexpected(
-                    fmt::format("Failed to create a worktree: ec: {}\nstderr: "
-                                "{}\nstdout: {}",
-                                errc_proc, stderr_s, stdout_s));
-            }
-
-        LOG_DEBUG("Presumably finished OK for next worktree path: {}",
-                  folder_path);
-        co_return {};
-    }
-
     [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
-    gh_create_pr(auto& ioc, Config const& cfg,
+    gh_create_pr(auto& ioc, gyou::Config const& cfg,
                  std::filesystem::path const& path_to_gh,
                  std::filesystem::path const& folder_path,
                  std::string const& branch_name)
@@ -378,525 +112,12 @@ namespace
         // create pr
     }
 
-    [[nodiscard]] corral::Task<
-        std::expected<std::filesystem::path, std::string>>
-    bash_ebuild(auto& ioc, Config const& cfg,
-                std::filesystem::path const& path_to_ebuild,
-                std::string_view const pv)
-    {
-        std::string pkg_full_name = path_to_ebuild.filename().stem().string();
-        std::string pkg_name = path_to_ebuild.parent_path().filename().string();
-        std::string category
-            = path_to_ebuild.parent_path().parent_path().filename().string();
-
-        std::filesystem::path temp_folder
-            = (cfg.path_to_tmp / category / pkg_full_name).concat("/");
-
-        std::error_code errc_mkdir_p;
-        std::filesystem::create_directories(temp_folder, errc_mkdir_p);
-        if (errc_mkdir_p)
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to create temp directory for a ebuild: {}",
-                    errc_mkdir_p.message()));
-            };
-
-        std::unordered_map<boost::process::environment::key,
-                           boost::process::environment::value>
-            env_for_ebuild = {
-                {"EBUILD", path_to_ebuild.string()},
-                {"T", temp_folder.string()},
-                {"PORTAGE_BIN_PATH", cfg.path_to_portage_bin.string()},
-                {"PORTAGE_PYM_PATH", cfg.path_to_portage_pym.string()},
-                {"PORTAGE_ECLASS_LOCATIONS_STR",
-                 cfg.path_to_gentoo_repo.string() + ":"
-                     + cfg.path_to_repo.string()},
-                {"EBUILD_PHASE", "_internal_test"},
-                {"CATEGORY", category},
-                {"PF", pkg_full_name},
-                {"PN", pkg_name},
-                {"PV", pv},
-            };
-
-        boost::asio::readable_pipe rp_stdout{ioc};
-        boost::asio::readable_pipe rp_stderr{ioc};
-
-        LOG_DEBUG("Presumably running next command: '{}'",
-                  (cfg.path_to_portage_bin / "ebuild.sh").string() + " "
-                      + "_internal_test" + " " + path_to_ebuild.string());
-
-        auto const path_to_ebuild_sh = cfg.path_to_portage_bin / "ebuild.sh";
-
-        auto proc = boost::process::process(
-            ioc, path_to_ebuild_sh.string(),
-            {"_internal_test", path_to_ebuild.string()},
-            boost::process::process_stdio{.in = {/* in to default */},
-                                          .out = rp_stdout,
-                                          .err = rp_stderr},
-            boost::process::process_environment{env_for_ebuild});
-
-        LOG_DEBUG("Doing sth in bash, probably");
-
-        std::string stdout_s;
-        std::string stderr_s;
-
-        auto [proc_tuple, _, _] = co_await corral::allOf(
-            proc.async_wait(corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stdout,
-                                    boost::asio::dynamic_buffer(stdout_s),
-                                    corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stderr,
-                                    boost::asio::dynamic_buffer(stderr_s),
-                                    corral::asio_nothrow_awaitable));
-        auto&& [_, errc_proc] = proc_tuple;
-
-        if (errc_proc != 0)
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to do ebuild: ec: {}\nstderr: {}\nstdout: {}",
-                    errc_proc, stderr_s, stdout_s));
-            }
-
-        co_return temp_folder;
-    }
-
-    // get current version of the pkg or commit of
-    // current pkg extract service and link
-    [[nodiscard]] corral::Task<std::expected<EbuildSpecificData, std::string>>
-    get_ebuild_info(auto& ioc, Config const& cfg, CommonContext& common_ctx,
-                    std::filesystem::directory_entry const& path_to_ebuild)
-    {
-        std::string category_str = path_to_ebuild.path()
-                                       .parent_path()
-                                       .parent_path()
-                                       .filename()
-                                       .string();
-
-        auto pkg_type = PackageType::Unknown;
-
-        std::string pkg_p = path_to_ebuild.path().filename().stem().string();
-        uint64_t date = 0;
-
-        if (RE2::FullMatch(pkg_p, common_ctx.re_pkg_with_date, &date))
-            {
-                pkg_type = PackageType::Commit;
-                LOG_INFO(
-                    "This is a package per "
-                    "commit: "
-                    "{} . Its date: {}",
-                    pkg_p, date);
-            }
-        else
-            {
-                pkg_type = PackageType::ReleaseOrTag;
-                LOG_INFO(
-                    "This is a package per "
-                    "release: {}",
-                    pkg_p);
-            }
-
-        common_ctx.re_version_matcher.input(pkg_p);
-        if (not common_ctx.re_version_matcher.find())
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to parse version of package : {}", pkg_p));
-            }
-
-        size_t match_id = 0;
-        while (common_ctx.re_version_matcher[match_id].first != nullptr)
-            {
-                LOG_TRACE_L2(
-                    "sth: {}",
-                    std::string_view{
-                        common_ctx.re_version_matcher[match_id].first,
-                        common_ctx.re_version_matcher[match_id].second});
-                if (common_ctx.re_version_matcher[match_id].first == nullptr)
-                    {
-                        LOG_DEBUG("It is nullptr.");
-                    }
-                ++match_id;
-            }
-
-        auto pkg_n = std::string{common_ctx.re_version_matcher[1].first,
-                                 common_ctx.re_version_matcher[1].second};
-        auto pkg_v = std::string{common_ctx.re_version_matcher[2].first,
-                                 common_ctx.re_version_matcher[2].second};
-        LOG_DEBUG("PN: '{}' PV: '{}'", pkg_n, pkg_v);
-        LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
-        auto temp_folder_path_res
-            = co_await bash_ebuild(ioc, cfg, path_to_ebuild.path(), pkg_v);
-
-        if (!temp_folder_path_res)
-            {
-                co_return std::unexpected(
-                    fmt::format("Failed to run ebuild.sh: {}",
-                                temp_folder_path_res.error()));
-            }
-        std::filesystem::path temp_file_path
-            = (temp_folder_path_res.value() / "environment");
-
-        LOG_DEBUG("Attempt to read the environment file into memory at {}",
-                  temp_file_path);
-        auto str_file_res = co_await file_to_string(ioc, temp_file_path);
-        if (not str_file_res)
-            {
-                co_return std::unexpected(
-                    fmt::format("Failed to read file. error: {}",
-                                str_file_res.error().message()));
-            }
-        LOG_TRACE_L2("env_file: \n{}\n\n", str_file_res.value());
-
-        std::string_view commit_env_var_name;
-
-        std::string_view commit;
-        if (PackageType::Commit == pkg_type)
-            {
-                if (not RE2::PartialMatch(str_file_res.value(),
-                                          common_ctx.re_commit_str,
-                                          &commit_env_var_name, &commit))
-                    {
-                        co_return std::unexpected(
-                            fmt::format("Regex for getting commit failed, "
-                                        "possible error: '{}'",
-                                        common_ctx.re_commit_str.error()));
-                    };
-            }
-
-        // get first url in SRC_URI
-        LOG_DEBUG("Attempt to get first URL from SRC_URI from {}",
-                  temp_file_path);
-        std::string_view src_uri_str;
-
-        if (not RE2::PartialMatch(str_file_res.value(), common_ctx.re_src_uri,
-                                  &src_uri_str))
-            {
-                co_return std::unexpected(fmt::format(
-                    "Regex for getting first URL from SRC_URI failed: {}",
-                    common_ctx.re_src_uri.error()));
-            }
-
-        // understand what service is this
-        LOG_DEBUG("Trying to undertand which service is that for {}",
-                  src_uri_str);
-        std::vector<int> indeces_matched;
-        indeces_matched.reserve(std::size(ServicesNames));
-
-        common_ctx.re_set_services.Match(src_uri_str, &indeces_matched);
-
-        if (indeces_matched.empty())
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to understand what service is an URI. URI: {}",
-                    src_uri_str));
-            }
-
-        Service service_id = magic_enum::enum_cast<Service>(
-                                 static_cast<size_t>(indeces_matched[0]))
-                                 .value();
-
-        LOG_DEBUG("Matched these: {}", magic_enum::enum_name(service_id));
-
-        co_return EbuildSpecificData{
-            .filepath = path_to_ebuild,
-            .p = pkg_p,
-            .pv = pkg_v,
-            .pn = pkg_n,
-            .category = category_str,
-            .first_uri = std::string(src_uri_str),
-            .commit_specific = std::invoke(
-                [&]() -> std::optional<EbuildCommitSpecific>
-                    {
-                        if (PackageType::Commit == pkg_type)
-                            {
-                                return EbuildCommitSpecific{
-                                    .date = date,
-                                    .commit = std::string{commit},
-                                    .env_var_name
-                                    = std::string(commit_env_var_name)};
-                            }
-
-                        return std::nullopt;
-                    }),
-            .service = service_id};
-    }
-
-    [[nodiscard]] corral::Task<
-        std::expected<std::variant<CommitSpecific, std::string>, std::string>>
-    github_fetch_version(auto& ioc, auto& semaphores,
-                         EbuildSpecificData const& ebuild_data)
-    {
-        std::string new_version{};
-        std::string new_commit{};
-        uint64_t new_date = 0;
-
-        boost::urls::url src_uri(ebuild_data.first_uri);
-
-        std::string workspace;
-        std::string repo;
-
-        bool is_tag = false;
-        for (int segment_pos_num = 0;
-             auto const& seg : src_uri.encoded_segments())
-            {
-                switch (segment_pos_num)
-                    {
-                        case 0:
-                            {
-                                workspace = seg;
-                                break;
-                            }
-                        case 1:
-                            {
-                                repo = seg;
-                                break;
-                            }
-                        case 3:
-                            {
-                                if ("refs" == seg)
-                                    {
-                                        is_tag = true;
-                                        // this is a legitimate use of goto.
-                                        // stfu.
-                                        // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-                                        goto end_loop;
-                                    }
-                                break;
-                            }
-                        default:
-                            break;
-                    };
-                ++segment_pos_num;
-            }
-    end_loop:
-        std::string feed_url = "https://github.com/" + workspace + "/" + repo;
-        if (is_tag)
-            {
-                feed_url += "/tags.atom";
-            }
-        else if (ebuild_data.commit_specific.has_value())
-            {
-                feed_url += "/commits.atom";
-            }
-        else
-            {
-                feed_url += "/releases.atom";
-            }
-
-        LOG_INFO("Presumable URL for feed: {}", feed_url);
-
-        std::string request_str;
-        {
-            auto lock = co_await semaphores
-                            .at(std::to_underlying(ebuild_data.service))
-                            .lock();
-            auto req_res
-                = co_await request_internet(ioc, "", boost::urls::url(feed_url),
-                                            boost::beast::http::verb::get,
-                                            boost::beast::http::header<true>{});
-
-            if (not req_res)
-                {
-                    co_return std::unexpected(req_res.error());
-                }
-
-            request_str = std::move(req_res.value());
-        }
-        LOG_TRACE_L3("response: {}", request_str);
-        LOG_INFO("Received feed. {}", feed_url);
-        boost::property_tree::ptree tree;
-        try
-            {
-                tree = parse_rss_into_tree(request_str);
-            }
-        catch (boost::property_tree::xml_parser_error& e)
-            {
-                co_return std::unexpected(
-                    fmt::format("Failed to parse feed: {}", e.what()));
-            }
-        std::string commit_version_or_tag;
-
-        for (auto& xml_entry : tree.get_child("feed"))
-            {
-                if ("entry" != xml_entry.first)
-                    {
-                        continue;
-                    }
-
-                auto const& link_entry
-                    = xml_entry.second.get_child("link.<xmlattr>.href");
-                boost::urls::url parsed_link{link_entry.data()};
-                LOG_DEBUG("Fetched url from: {}", parsed_link.c_str());
-                for (int segment_num = 0;
-                     auto const& seg : parsed_link.encoded_segments())
-                    {
-                        LOG_TRACE_L1("{} seg: {}", segment_num,
-                                     std::string_view{seg});
-                        if (3 == segment_num
-                            && ebuild_data.commit_specific.has_value())
-                            {
-                                commit_version_or_tag = seg;
-                            }
-                        if (4 == segment_num)
-                            {
-                                commit_version_or_tag = seg;
-                            }
-                        ++segment_num;
-                    }
-                LOG_TRACE_L1(
-                    "is_tag: {}, is it commit type: {} commit_version_or_tag: "
-                    "{}",
-                    is_tag, ebuild_data.commit_specific.has_value(),
-                    commit_version_or_tag);
-                if (is_tag or not ebuild_data.commit_specific.has_value())
-                    {
-                        new_version = std::move(commit_version_or_tag);
-                    }
-                else
-                    {
-                        new_commit = std::move(commit_version_or_tag);
-                    }
-                if (ebuild_data.commit_specific.has_value())
-                    {
-                        std::string date_str
-                            = xml_entry.second.get_child("updated").data();
-
-                        std::chrono::sys_time<std::chrono::seconds>
-                            time_from_epoch{};
-
-                        std::istringstream in_stream_for_parsing{date_str};
-
-                        if (is_tag or ebuild_data.commit_specific.has_value())
-                            {
-                                in_stream_for_parsing >> std::chrono::parse(
-                                    "%Y-%m-%dT%H:%M:%SZ", time_from_epoch);
-                            }
-                        else
-                            {
-                                in_stream_for_parsing >> std::chrono::parse(
-                                    "%Y-%m-%dT%H:%M:%S%Ez", time_from_epoch);
-                            }
-
-                        LOG_TRACE_L1("Seconds: {}", time_from_epoch);
-                        auto days = std::chrono::sys_days{
-                            std::chrono::floor<std::chrono::days>(
-                                time_from_epoch)};
-                        LOG_TRACE_L1("Days: {}",
-                                     days.time_since_epoch().count());
-                        std::chrono::year_month_day ymd{days};
-                        LOG_TRACE_L1("ymd: y: {} m: {} d: {}",
-                                     static_cast<int>(ymd.year()),
-                                     static_cast<unsigned>(ymd.month()),
-                                     static_cast<unsigned>(ymd.day()));
-
-                        // intention is to get a num that in decimal would look
-                        // like 'yyyymmdd', Plain dumb math and fucking explicit
-                        // casts to uint64_t.
-                        // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-                        new_date = static_cast<uint64_t>(
-                                       (static_cast<int>(ymd.year()) * 10000))
-                                   + (static_cast<uint64_t>(
-                                          static_cast<unsigned>(ymd.month()))
-                                      * 100)
-                                   + static_cast<uint64_t>(
-                                       static_cast<unsigned>(ymd.day()));
-                        // NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-                    }
-                // do it only once to get info only for latest entry.
-                break;
-            }
-        if (ebuild_data.commit_specific.has_value())
-            {
-                LOG_INFO("Fetched date: {} commit: {}", new_date, new_commit);
-                co_return CommitSpecific{.date = new_date,
-                                         .commit = new_commit};
-            }
-        LOG_INFO("Fetched version '{}'", new_version);
-        if (new_version.starts_with("v"))
-            {
-                new_version = new_version.substr(1);
-            }
-        co_return new_version;
-    }
-
-    // check if we support the service
-    // semaphore
-    // check for update
-    [[nodiscard]] corral::Task<
-        std::expected<std::variant<CommitSpecific, std::string>, std::string>>
-    get_latest_info(auto& ioc, Config const& cfg, auto& semaphores,
-                    CommonContext& common_ctx,
-                    EbuildSpecificData const& ebuild_data)
-    {
-        // what is url of a feed for the service and the package? is it per tag,
-        // per commit or per release? get feed, limit via semaphores write a
-        // 27 different handlers. auto lock = co_await semaphores
-        //                 .at(static_cast<size_t>(indeces_matched[0]))
-        //                 .lock();
-
-        std::variant<CommitSpecific, std::string> fetched_data{};
-
-        switch (ebuild_data.service)
-            {
-                case Service::github:
-                    {
-                        auto fetched_res = co_await github_fetch_version(
-                            ioc, semaphores, ebuild_data);
-                        if (not fetched_res)
-                            {
-                                co_return std::unexpected(fetched_res.error());
-                            }
-                        fetched_data = std::move(fetched_res.value());
-                        break;
-                    }
-                case Service::gitlab:
-                case Service::bitbucket:
-                case Service::codeberg:
-                case Service::cpan:
-                case Service::cpan_module:
-                case Service::cpe:
-                case Service::cran:
-                case Service::ctan:
-                case Service::freedesktop_gitlab:
-                case Service::gentoo:
-                case Service::gnome_gitlab:
-                case Service::google_code:
-                case Service::hackage:
-                case Service::heptapod:
-                case Service::kde_invent:
-                case Service::launchpad:
-                case Service::osdn:
-                case Service::pear:
-                case Service::pecl:
-                case Service::pypi:
-                case Service::rubygems:
-                case Service::savannah:
-                case Service::savannah_nongnu:
-                case Service::sourceforge:
-                case Service::sourcehut:
-                case Service::vim:
-                    co_return std::unexpected(fmt::format(
-                        "This service is not yet supported: {}",
-                        magic_enum::enum_name(ebuild_data.service)));
-                    break;
-            };
-
-        fetched_data.visit(
-            overloads{[&](CommitSpecific const& fetched) mutable
-                          {
-                              LOG_DEBUG("Fetched: '{}' '{}'", fetched.date,
-                                        fetched.commit);
-                          },
-                      [&](std::string const& fetched)
-                          { LOG_DEBUG("Fetched: {}", fetched); }});
-        co_return fetched_data;
-    }
-
     // NOLINTNEXTLINE(altera-struct-pack-align)
     struct EditCommit
     {
         std::string env_var_name;
-        CommitSpecific old_ver;
-        CommitSpecific new_ver;
+        gyou::CommitSpecific old_ver;
+        gyou::CommitSpecific new_ver;
     };
 
     // NOLINTNEXTLINE(altera-struct-pack-align)
@@ -921,63 +142,16 @@ namespace
         bool is_any_failed = false;
     };
 
-/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
-#define TRY_OR_CO_RETURN(expr)                                      \
-    __extension__({                                                 \
-        auto&& _res = (expr);                                       \
-        if (!_res)                                                  \
-            {                                                       \
-                co_return std::unexpected(std::move(_res.error())); \
-            }                                                       \
-        std::move(*_res);                                           \
-    })
-
-/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage,cppcoreguidelines-avoid-do-while)
- */
-#define TRY_OR_CO_RETURN_VOID(expr)                                     \
-    do                                                                  \
-        {                                                               \
-            auto&& _res = (expr);                                       \
-            if (!_res)                                                  \
-                {                                                       \
-                    co_return std::unexpected(std::move(_res.error())); \
-                }                                                       \
-        }                                                               \
-    while (0)
-
-/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage,cppcoreguidelines-avoid-do-while)
- */
-#define TRY_OR_CO_RETURN_VOID_TRANSFORM_ERROR(expr, expr2)                     \
-    do                                                                         \
-        {                                                                      \
-            auto&& _res = (expr);                                              \
-            if (!_res)                                                         \
-                {                                                              \
-                    co_return std::unexpected(expr2(std::move(_res.error()))); \
-                }                                                              \
-        }                                                                      \
-    while (0)
-
-/* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
-#define TRY_OR_CO_RETURN_TRANSFORM_ERROR(expr, expr2)                      \
-    __extension__({                                                        \
-        auto&& _res = (expr);                                              \
-        if (!_res)                                                         \
-            {                                                              \
-                co_return std::unexpected(expr2(std::move(_res.error()))); \
-            }                                                              \
-        std::move(*_res);                                                  \
-    })
-
     //  return what to change
     [[nodiscard]] corral::Task<
         std::expected<std::optional<InfoForDiff>, std::string>>
-    logic_per_ebuild(auto& ioc, Config const& cfg,
+    logic_per_ebuild(auto& ioc, gyou::Config const& cfg,
                      std::filesystem::directory_entry const& path_to_ebuild,
-                     auto& semaphores, CommonContext& common_ctx)
+                     auto& semaphores, gyou::CommonContext& common_ctx)
     {
-        EbuildSpecificData const ebuild_data = TRY_OR_CO_RETURN(
-            co_await get_ebuild_info(ioc, cfg, common_ctx, path_to_ebuild));
+        gyou::EbuildSpecificData const ebuild_data
+            = TRY_OR_CO_RETURN(co_await gyou::get_ebuild_info(
+                ioc, cfg, common_ctx, path_to_ebuild));
 
         LOG_TRACE_L1("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
                      ebuild_data.first_uri,
@@ -993,7 +167,7 @@ namespace
                           ebuild_data.commit_specific.value().commit);
             }
 
-        std::variant<CommitSpecific, std::string> fetched_ver
+        std::variant<gyou::CommitSpecific, std::string> fetched_ver
             = TRY_OR_CO_RETURN(co_await get_latest_info(
                 ioc, cfg, semaphores, common_ctx, ebuild_data));
 
@@ -1007,7 +181,7 @@ namespace
             }
 
         fetched_ver.visit(overloads{
-            [&](CommitSpecific const& fetched) mutable
+            [&](gyou::CommitSpecific const& fetched) mutable
                 {
                     LOG_INFO("Fetched: '{}' '{}' '{}'", ebuild_data.p,
                              fetched.date, fetched.commit);
@@ -1017,7 +191,7 @@ namespace
 
         bool is_changed = false;
         fetched_ver.visit(overloads{
-            [&](CommitSpecific const& fetched) mutable
+            [&](gyou::CommitSpecific const& fetched) mutable
                 {
                     if (ebuild_data.commit_specific.value().date < fetched.date)
                         {
@@ -1037,24 +211,25 @@ namespace
                 LOG_INFO("New version!!!");
                 InfoForDiff diff{};
                 fetched_ver.visit(overloads{
-                    [&](CommitSpecific const& fetched) mutable
+                    [&](gyou::CommitSpecific const& fetched) mutable
                         {
-                            diff = {.data_for_how_to_change = EditCommit{
-                                        .env_var_name
-                                        = ebuild_data.commit_specific.value()
-                                              .env_var_name,
-                                        .old_ver
-                                        = CommitSpecific{.date
-                                                         = ebuild_data
-                                                               .commit_specific
-                                                               .value()
-                                                               .date,
-                                                         .commit
-                                                         = ebuild_data
-                                                               .commit_specific
-                                                               .value()
-                                                               .commit},
-                                        .new_ver = fetched}};
+                            diff
+                                = {.data_for_how_to_change = EditCommit{
+                                       .env_var_name
+                                       = ebuild_data.commit_specific.value()
+                                             .env_var_name,
+                                       .old_ver = gyou::
+                                           CommitSpecific{.date
+                                                          = ebuild_data
+                                                                .commit_specific
+                                                                .value()
+                                                                .date,
+                                                          .commit
+                                                          = ebuild_data
+                                                                .commit_specific
+                                                                .value()
+                                                                .commit},
+                                       .new_ver = fetched}};
                         },
                     [&](std::string const& fetched) mutable
                         {
@@ -1072,8 +247,8 @@ namespace
     }
 
     [[nodiscard]] corral::Task<PackagesToUpdate> get_what_to_change(
-        auto& ioc, Config const& cfg, auto& semaphores,
-        CommonContext& common_ctx)
+        auto& ioc, gyou::Config const& cfg, auto& semaphores,
+        gyou::CommonContext& common_ctx)
     {
         PackagesToUpdate changes;
         CORRAL_WITH_NURSERY(nursery)
@@ -1189,8 +364,8 @@ namespace
                 std::string const editted_ebuild_content = __extension__({
                     std::string ebuild_content
                         = TRY_OR_CO_RETURN_TRANSFORM_ERROR(
-                            co_await file_to_string(ioc,
-                                                    diff_info.path_to_ebuild),
+                            co_await gyou::file_to_string(
+                                ioc, diff_info.path_to_ebuild),
                             [](boost::system::error_code errc)
                                 { return errc.what(); });
                     gyou::Replace(std::move(ebuild_content),
@@ -1215,8 +390,8 @@ namespace
                 std::filesystem::path const new_path = path_base / new_name;
 
                 TRY_OR_CO_RETURN_VOID_TRANSFORM_ERROR(
-                    co_await string_to_file(ioc, editted_ebuild_content,
-                                            old_path),
+                    co_await gyou::string_to_file(ioc, editted_ebuild_content,
+                                                  old_path),
                     [](boost::system::error_code errc) { return errc.what(); });
 
                 // move the file to a file with new date. for now, just use
@@ -1276,6 +451,7 @@ namespace
                                 old_path, new_path, errc.message()));
                         };
                 }
+
                 LOG_INFO(
                     "Presumably successfully applied change to the ebuild: {}",
                     diff_info.path_to_ebuild);
@@ -1286,9 +462,9 @@ namespace
             "Apparently, not all alternatives of InfoForDiffWereCovered");
     }
 
-    [[nodiscard]] corral::Task<ReturnCode> chief_logic(
-        auto& ioc, Config const& cfg, auto& semaphores,
-        CommonContext& common_ctx)
+    [[nodiscard]] corral::Task<gyou::ReturnCode> chief_logic(
+        auto& ioc, gyou::Config const& cfg, auto& semaphores,
+        gyou::CommonContext& common_ctx)
     {
         PackagesToUpdate const changes
             = co_await get_what_to_change(ioc, cfg, semaphores, common_ctx);
@@ -1323,14 +499,14 @@ namespace
             = cfg.path_to_repo / "groups-ci.json";
 
         std::string const str_grouping = __extension__({
-            auto res = co_await file_to_string(ioc, path_to_grouping);
+            auto res = co_await gyou::file_to_string(ioc, path_to_grouping);
             if (!res)
                 {
                     LOG_ERROR(
                         "Got error during getting the groups-ci.json file : "
                         "'{}'",
                         std::move(res.error().message()));
-                    co_return ReturnCode::FailedReadingGroupCiFile;
+                    co_return gyou::ReturnCode::FailedReadingGroupCiFile;
                 };
             std::move(res.value());
         });
@@ -1343,7 +519,7 @@ namespace
                         "Got error during parsing the groups-ci.json file : "
                         "'{}'",
                         std::move(res.error()));
-                    co_return ReturnCode::FailedParsingGroupCiFile;
+                    co_return gyou::ReturnCode::FailedParsingGroupCiFile;
                 }
             std::move(res.value());
         });
@@ -1402,7 +578,7 @@ namespace
             {
                 LOG_ERROR("Failed to create temp directory for worktrees: {}",
                           errc_mkdir_p_worktrees.message());
-                co_return ReturnCode::FailedCreateDirTmpWorktrees;
+                co_return gyou::ReturnCode::FailedCreateDirTmpWorktrees;
             };
         LOG_TRACE_L2("Created folder for worktrees.");
 
@@ -1413,7 +589,7 @@ namespace
                 {
                     LOG_ERROR(
                         "Failed to find 'git' executable in your environment.");
-                    co_return ReturnCode::FailedToFindGit;
+                    co_return gyou::ReturnCode::FailedToFindGit;
                 }
             path_to_git_;
         });
@@ -1425,12 +601,12 @@ namespace
                 {
                     LOG_ERROR(
                         "Failed to find 'gh' executable in your environment.");
-                    co_return ReturnCode::FailedToFindGh;
+                    co_return gyou::ReturnCode::FailedToFindGh;
                 }
             path_to_gh_;
         });
 
-        std::optional<ReturnCode> return_code;
+        std::optional<gyou::ReturnCode> return_code;
         CORRAL_WITH_NURSERY(nursery)
         {
             // logic for 0, i.e. no grouping
@@ -1463,9 +639,10 @@ namespace
                          = it_grp_to_chg_idx->second]() -> corral::Task<void>
                             {
                                 {
-                                    auto res = co_await git_create_worktree(
-                                        ioc, cfg, path_to_git, folder_path,
-                                        branch_name);
+                                    auto res
+                                        = co_await gyou::git_create_worktree(
+                                            ioc, cfg, path_to_git, folder_path,
+                                            branch_name);
                                     if (not res)
                                         {
                                             LOG_ERROR(
@@ -1473,7 +650,7 @@ namespace
                                                 "worktree: "
                                                 "{}",
                                                 std::move(res.error()));
-                                            return_code = ReturnCode::
+                                            return_code = gyou::ReturnCode::
                                                 FailedMakingGitToMakeWorktrees;
                                             nursery.cancel();
                                             co_return;
@@ -1491,8 +668,8 @@ namespace
                                                 "Failed to apply changes: "
                                                 "{}",
                                                 std::move(res.error()));
-                                            return_code
-                                                = ReturnCode::FailedApplyChange;
+                                            return_code = gyou::ReturnCode::
+                                                FailedApplyChange;
                                             nursery.cancel();
                                             co_return;
                                         }
@@ -1544,7 +721,7 @@ namespace
                                                 "worktree: "
                                                 "{}",
                                                 std::move(res.error()));
-                                            return_code = ReturnCode::
+                                            return_code = gyou::ReturnCode::
                                                 FailedMakingGitToMakeWorktrees;
                                             nursery.cancel();
                                             co_return;
@@ -1578,8 +755,8 @@ namespace
                                                                 "{}",
                                                                 std::move(
                                                                     res.error()));
-                                                            return_code
-                                                                = ReturnCode::
+                                                            return_code = gyou::
+                                                                ReturnCode::
                                                                     FailedApplyChange;
                                                             nursery.cancel();
                                                             co_return;
@@ -1600,30 +777,32 @@ namespace
 
         if (changes.is_any_failed and changes.is_any_successful)
             {
-                co_return ReturnCode::PartialSuccess;
+                co_return gyou::ReturnCode::PartialSuccess;
             }
         else if (changes.is_any_failed and not changes.is_any_successful)
             {
-                co_return ReturnCode::AllHaveFailed;
+                co_return gyou::ReturnCode::AllHaveFailed;
             }
         else if (not changes.is_any_successful)
             {
-                co_return ReturnCode::NoEbuildFound;
+                co_return gyou::ReturnCode::NoEbuildFound;
             }
         else
             {
-                co_return ReturnCode::Success;
+                co_return gyou::ReturnCode::Success;
                 ;
             }
     }
 
-    corral::Task<ReturnCode> actual_chief(auto& ioc, Config const& cfg)
+    corral::Task<gyou::ReturnCode> actual_chief(auto& ioc,
+                                                gyou::Config const& cfg)
     {
-        constexpr size_t amount_of_services = magic_enum::enum_count<Service>();
+        constexpr size_t amount_of_services
+            = magic_enum::enum_count<gyou::Service>();
 
         std::array<corral::Semaphore, amount_of_services>
             semaphores_per_services
-            = make_array_from_factory<amount_of_services>(
+            = gyou::make_array_from_factory<amount_of_services>(
                 [concurrency_per_service = cfg.concurrency_per_service]()
                     { return corral::Semaphore(concurrency_per_service); });
 
@@ -1637,7 +816,7 @@ namespace
         const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
             str_re_versions);
 
-        CommonContext common_ctx{
+        gyou::CommonContext common_ctx{
             .re_commit_str = RE2(
                 R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
                 RE2::Quiet),
@@ -1654,7 +833,7 @@ namespace
                     {
                         RE2::Set re_set_services(RE2::DefaultOptions,
                                                  RE2::Anchor::UNANCHORED);
-                        for (auto&& service : ServicesNames)
+                        for (auto&& service : gyou::ServicesNames)
                             {
                                 re_set_services.Add(service, nullptr);
                             }
@@ -1664,8 +843,8 @@ namespace
             .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
         };
 
-        ReturnCode res = co_await chief_logic(ioc, cfg, semaphores_per_services,
-                                              common_ctx);
+        gyou::ReturnCode res = co_await chief_logic(
+            ioc, cfg, semaphores_per_services, common_ctx);
         co_return res;
     }
 
@@ -1673,9 +852,9 @@ namespace
 
 int main(int argc, char* argv[])
 {
-    Config cfg;
+    gyou::Config cfg;
 
-    // Config parsing
+    // gyou::Config parsing
     {
         CLI::App app{
             "Post-processor for YouTube's RSS feed, so that you get "
@@ -1731,7 +910,7 @@ int main(int argc, char* argv[])
                        "Amount of concurrent request per service"
                        "by this application")
             ->check(CLI::PositiveNumber)
-            ->default_val(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE);
+            ->default_val(gyou::DEFAULT_MAX_CONCURRENT_REQUESTS_PER_SERVICE);
         try
             {
                 app.parse(argc, argv);
@@ -1794,7 +973,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
 
                 fmt::print(std::cerr, "{}", log);
                 return std::to_underlying(
-                    ReturnCode::FailSpecifiedValueIsIncorrect);
+                    gyou::ReturnCode::FailSpecifiedValueIsIncorrect);
             }
         catch (OmegaException<std::string>& e)
             {
@@ -1826,7 +1005,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
 
                 fmt::print(std::cerr, "{}", log);
                 return std::to_underlying(
-                    ReturnCode::FailSpecifiedValueIsIncorrect);
+                    gyou::ReturnCode::FailSpecifiedValueIsIncorrect);
             }
         catch (std::exception& e)
             {
@@ -1848,7 +1027,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace.
 )",
                     e.what(), boost::stacktrace::to_string(trace));
                 return std::to_underlying(
-                    ReturnCode::FailDuringInitializationConfig);
+                    gyou::ReturnCode::FailDuringInitializationConfig);
             }
     }
 
@@ -1875,7 +1054,8 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace.
 {}
 )",
                 e.what(), boost::stacktrace::to_string(trace));
-            return std::to_underlying(ReturnCode::FailInitializationLogger);
+            return std::to_underlying(
+                gyou::ReturnCode::FailInitializationLogger);
         }
 
     // Finally main.
@@ -1891,7 +1071,8 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace.
                 {
                     return std::to_underlying(main_opt.value());
                 }
-            return std::to_underlying(ReturnCode::ReceivedCancellationSignal);
+            return std::to_underlying(
+                gyou::ReturnCode::ReceivedCancellationSignal);
         }
     catch (OmegaException<std::filesystem::path>& e)
         {
@@ -1922,7 +1103,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
 
             fmt::print(std::cerr, "{}", log);
             LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCode::FailParsePromptResult);
+            return std::to_underlying(gyou::ReturnCode::FailParsePromptResult);
         }
     catch (OmegaException<std::string>& e)
         {
@@ -1953,7 +1134,7 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace:
 
             fmt::print(std::cerr, "{}", log);
             LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCode::FailParsePromptResult);
+            return std::to_underlying(gyou::ReturnCode::FailParsePromptResult);
         }
     catch (std::exception& e)
         {
@@ -1974,6 +1155,6 @@ Here's an attempt to get backtrace of it via boost::stacktrace and libbacktrace.
 
             fmt::print(std::cerr, "{}", log);
             LOG_ERROR("{}", log);
-            return std::to_underlying(ReturnCode::FailStandardException);
+            return std::to_underlying(gyou::ReturnCode::FailStandardException);
         }
 }

@@ -1,8 +1,8 @@
 project(quill_usage VERSION 1.0 LANGUAGES CXX)
 
 add_library(${PROJECT_NAME} STATIC
-        overwrite_log_macros.h
-        quill_static.h
+        overwrite_log_macros.hpp
+        quill_static.hpp
         quill_static.cpp)
 
 # Add include directories for this library

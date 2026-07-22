@@ -30,6 +30,14 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS
 add_executable(${PROJECT_NAME} ${headers} ${sources}
                                ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
+target_compile_definitions(${PROJECT_NAME}
+    PUBLIC BOOST_STACKTRACE_USE_BACKTRACE=1
+    PUBLIC BOOST_ASIO_HAS_FILE=1
+    PUBLIC BOOST_ASIO_HAS_IO_URING=1
+    PUBLIC BOOST_PROCESS_V2_DISABLE_NOTIFY_FORK=1
+    PUBLIC BOOST_PROCESS_USE_STD_FS=1
+)
+
 target_include_directories(
   ${PROJECT_NAME}
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

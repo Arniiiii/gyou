@@ -9,12 +9,13 @@
 #include <boost/beast.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/url.hpp>
+#include <boost/date_time.hpp>
 #include <corral/asio.h>
 #include <corral/corral.h>
 #include <corral/detail/asio.h>
 #include <magic_enum/magic_enum.hpp>
 
-#include "overwrite_log_macros.h"
+#include "overwrite_log_macros.hpp"
 
 constexpr size_t MAX_EXPECTED_CHARACTERS = 128000;
 constexpr auto MAX_PROMPT_TIME = std::chrono::minutes(10);
