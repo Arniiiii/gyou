@@ -115,30 +115,26 @@ namespace
 
         for (auto const& diff : changes.what_to_change)
             {
-                if (std::holds_alternative<gyou::EditCommit>(
-                        diff.data_for_how_to_change))
-                    {
-                        gyou::EditCommit commits_diff
-                            = std::get<gyou::EditCommit>(
-                                diff.data_for_how_to_change);
-                        LOG_INFO(
-                            "Edit: path: '{}' old date: '{}' new date: '{}' "
-                            "old commit: '{}' new commit: '{}'",
-                            diff.path_to_ebuild, commits_diff.old_ver.date,
-                            commits_diff.new_ver.date,
-                            commits_diff.old_ver.commit,
-                            commits_diff.new_ver.commit);
-                    }
-                else if (std::holds_alternative<gyou::EditVerOrTag>(
-                             diff.data_for_how_to_change))
-                    {
-                        gyou::EditVerOrTag commits_diff
-                            = std::get<gyou::EditVerOrTag>(
-                                diff.data_for_how_to_change);
-                        LOG_INFO("Edit: path: '{}' old ver: '{}' new ver: '{}'",
-                                 diff.path_to_ebuild, commits_diff.old_ver,
-                                 commits_diff.new_ver);
-                    }
+                match(
+                    diff.data_for_how_to_change,
+                    [&](gyou::EditCommit const& diff_commit)
+                        {
+                            LOG_INFO(
+                                "Edit: path: '{}' old date: '{}' new date: "
+                                "'{}' "
+                                "old commit: '{}' new commit: '{}'",
+                                diff.path_to_ebuild, diff_commit.old_ver.date,
+                                diff_commit.new_ver.date,
+                                diff_commit.old_ver.commit,
+                                diff_commit.new_ver.commit);
+                        },
+                    [&](gyou::EditVerOrTag const& diff_ver_tag)
+                        {
+                            LOG_INFO(
+                                "Edit: path: '{}' old ver: '{}' new ver: '{}'",
+                                diff.path_to_ebuild, diff_ver_tag.old_ver,
+                                diff_ver_tag.new_ver);
+                        });
             }
 
         std::filesystem::path const path_to_grouping
