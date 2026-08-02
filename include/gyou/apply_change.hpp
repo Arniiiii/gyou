@@ -14,8 +14,10 @@
 #include <corral/utility.h>
 #include <fmt/format.h>
 
+#include "gyou/bash_ebuild_manifest.hpp"
 #include "gyou/file_to_string.hpp"
 #include "gyou/string_to_file.hpp"
+#include "gyou/structs/config.hpp"
 #include "gyou/structs/result_of_parsing.hpp"
 #include "gyou/utils/rusty_macros.hpp"
 #include "gyou/utils/string_replace.hpp"
@@ -26,7 +28,8 @@ namespace gyou
 {
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>> apply_change(
-        auto& ioc, std::filesystem::path const where_to_change,
+        auto& ioc, gyou::Config const& cfg,
+        std::filesystem::path const where_to_change,
         gyou::InfoForDiff const& diff_info)
     {
         LOG_INFO("Trying to apply a change for next ebuild: {}",
@@ -134,9 +137,18 @@ namespace gyou
                         }
 
                         LOG_INFO(
-                            "Presumably successfully applied change to the "
+                            "Presumably applied change to the "
                             "ebuild: {}",
                             diff_info.path_to_ebuild);
+
+                        TRY_OR_CO_RETURN(
+                            co_await gyou::bash_ebuild_manifest_update(
+                                ioc, cfg, new_path, diff_details.new_ver));
+
+                        LOG_INFO(
+                            "Presumably updated manifest for the ebuild: {}",
+                            diff_info.path_to_ebuild);
+
                         co_return {};
                     }}));
 

@@ -301,7 +301,7 @@ namespace
 
                                 {
                                     auto res = co_await gyou::apply_change(
-                                        ioc, folder_path,
+                                        ioc, cfg, folder_path,
                                         changes.what_to_change.at(chg_idx));
                                     if (not res)
                                         {
@@ -379,9 +379,10 @@ namespace
                                              = it_grp_to_chg_idx->second]()
                                                 -> corral::Task<void>
                                                 {
-                                                    auto res
-                                                        = co_await apply_change(
-                                                            ioc, folder_path,
+                                                    auto res = co_await gyou::
+                                                        apply_change(
+                                                            ioc, cfg,
+                                                            folder_path,
                                                             changes
                                                                 .what_to_change
                                                                 .at(chg_idx));
