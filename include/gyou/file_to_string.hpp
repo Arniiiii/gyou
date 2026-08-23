@@ -24,7 +24,7 @@ namespace gyou
 
     [[nodiscard]] corral::Task<
         std::expected<std::string, boost::system::error_code>>
-    file_to_string(auto& ioc, std::filesystem::path const& file_path)
+    file_to_string(boost::asio::io_context & ioc, std::filesystem::path const& file_path)
     {
         if (not std::filesystem::exists(file_path))
             {

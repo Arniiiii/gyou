@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <expected>
 #include <filesystem>
@@ -66,6 +67,7 @@
 #include <reflex/pcre2matcher.h>
 
 #include "gyou/apply_change.hpp"
+#include "gyou/bash_ebuild_manifest.hpp"
 #include "gyou/file_to_string.hpp"
 #include "gyou/get_what_to_change.hpp"
 #include "gyou/git_worktree.hpp"
@@ -92,7 +94,7 @@ namespace
 {
 
     [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
-    gh_create_pr(auto& ioc, gyou::Config const& cfg,
+    gh_create_pr(boost::asio::io_context& ioc, gyou::Config const& cfg,
                  std::filesystem::path const& path_to_gh,
                  std::filesystem::path const& folder_path,
                  std::string const& branch_name)
@@ -106,7 +108,7 @@ namespace
     }
 
     [[nodiscard]] corral::Task<gyou::ReturnCode> chief_logic(
-        auto& ioc, gyou::Config const& cfg, auto& semaphores,
+        boost::asio::io_context& ioc, gyou::Config const& cfg, auto& semaphores,
         gyou::CommonContext& common_ctx)
     {
         gyou::PackagesToUpdate const changes
@@ -433,7 +435,7 @@ namespace
             }
     }
 
-    corral::Task<gyou::ReturnCode> actual_chief(auto& ioc,
+    corral::Task<gyou::ReturnCode> actual_chief(boost::asio::io_context& ioc,
                                                 gyou::Config const& cfg)
     {
         constexpr size_t amount_of_services
@@ -454,6 +456,15 @@ namespace
 
         const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
             str_re_versions);
+
+        // NOLINTBEGIN(hicpp-signed-bitwise)
+        std::string str_package_re_versions = reflex::PCRE2UTFMatcher::convert(
+            R"(([\w][\w+-]*?-)?((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
+            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
+        // NOLINTEND(hicpp-signed-bitwise)
+
+        const reflex::PCRE2UTFMatcher::Pattern& pattern_package_re_versions(
+            str_package_re_versions);
 
         gyou::CommonContext common_ctx{
             .re_commit_str = RE2(
@@ -480,6 +491,8 @@ namespace
                         return std::move(re_set_services);
                     }),
             .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
+            .re_package_version_matcher
+            = reflex::PCRE2UTFMatcher(pattern_package_re_versions),
         };
 
         gyou::ReturnCode res = co_await chief_logic(

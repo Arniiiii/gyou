@@ -1,0 +1,66 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "digest debug ebuild python",
+            "type": "python",
+            "request": "launch",
+            "subProcess": false,
+            "python": "/usr/bin/python3",
+            "program": "${env:HOME}/data/code/experiments/portage/bin/ebuild",
+            "args": [
+                "/tmp/tmp_gyou/worktrees/0_dev-cppkokkos/dev-cpp/kokkos/kokkos-5.2.1.ebuild",
+                "manifest"
+            ],
+            "env": {
+                "PORTAGE_BZIP2_COMMAND": "/usr/bin/bzip2",
+                "PORTAGE_BIN_PATH": "/home/paxu/data/code/experiments/portage/bin",
+                "PORTAGE_PYM_PATH": "/tmp/tmp_gyou/",
+                "PORTAGE_ECLASS_LOCATIONS": "/var/db/repos/gentoo/:/home/paxu/data/code/mygentoo/ex_repo/",
+                "PORTAGE_ECLASS_LOCATIONS_STR": "/var/db/repos/gentoo/:/home/paxu/data/code/mygentoo/ex_repo/",
+                "PORTAGE_DEBUG": "1",
+                "EBUILD": "/tmp/tmp_gyou/worktrees/0_dev-cppkokkos/dev-cpp/kokkos/kokkos-5.2.1.ebuild",
+                "DISTDIR": "/tmp/tmp_gyou/distfiles/",
+                "T": "/tmp/tmp_gyou/dev-cpp/kokkos-5.2.1/",
+                "ECLASS_DEBUG_OUTPUT": "1",
+                "PORTAGE_QUIET": "0"
+            },
+            "cwd": "${workspaceFolder}",
+            "terminalKind": "integrated",
+            "console": "integratedTerminal",
+            "redirectOutput": true
+        },
+        {
+            "name": "digest debug",
+            "type": "bashdb",
+            "request": "launch",
+            "program": "${env:HOME}/data/code/experiments/portage/bin/ebuild.sh",
+            "pathBashdb": "${env:HOME}/.local/share/nvim/mason/packages/bash-debug-adapter/extension/bashdb_dir/bashdb",
+            "pathBashdbLib": "${env:HOME}/.local/share/nvim/mason/packages/bash-debug-adapter/extension/bashdb_dir",
+            "pathBash": "bash",
+            "pathCat": "cat",
+            "pathMkfifo": "mkfifo",
+            "pathPkill": "pkill",
+            "terminalKind": "integrated",
+            "args": [
+                "/tmp/tmp_gyou/worktrees/0_dev-cppsqlpp23/dev-cpp/sqlpp23/sqlpp23-0.70.ebuild",
+                "digest"
+            ],
+            "env": {
+                "PORTAGE_BIN_PATH": "/home/paxu/data/code/experiments/portage/bin",
+                "PORTAGE_PYM_PATH": "/tmp/tmp_gyou/",
+                "PORTAGE_ECLASS_LOCATIONS": "/var/db/repos/gentoo/:/home/paxu/data/code/mygentoo/ex_repo/",
+                "PORTAGE_ECLASS_LOCATIONS_STR": "/var/db/repos/gentoo/:/home/paxu/data/code/mygentoo/ex_repo/",
+                "PORTAGE_DEBUG": "1",
+                "EBUILD": "/tmp/tmp_gyou/worktrees/0_dev-cppsqlpp23/dev-cpp/sqlpp23/sqlpp23-0.70.ebuild",
+                "T": "/tmp/tmp_gyou/dev-cpp/sqlpp23-0.68/",
+                "EBUILD_PHASE": "manifest",
+                "CATEGORY": "dev-libs",
+                "PF": "sqlpp23-0.70",
+                "ECLASS_DEBUG_OUTPUT": "1",
+                "PORTAGE_QUIET": "0"
+            },
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

@@ -18,6 +18,7 @@ namespace gyou
         RE2 re_pkg_with_date;
         RE2::Set re_set_services;
         reflex::PCRE2UTFMatcher re_version_matcher;
+        reflex::PCRE2UTFMatcher re_package_version_matcher;
     };
 }  // namespace gyou
 

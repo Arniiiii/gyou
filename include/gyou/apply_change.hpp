@@ -13,6 +13,7 @@
 #include <corral/corral.h>
 #include <corral/utility.h>
 #include <fmt/format.h>
+#include <fmt/std.h>
 
 #include "gyou/bash_ebuild_manifest.hpp"
 #include "gyou/file_to_string.hpp"
@@ -28,7 +29,7 @@ namespace gyou
 {
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>> apply_change(
-        auto& ioc, gyou::Config const& cfg,
+        boost::asio::io_context& ioc, gyou::Config const& cfg,
         std::filesystem::path const where_to_change,
         gyou::InfoForDiff const& diff_info)
     {
@@ -73,6 +74,11 @@ namespace gyou
                         std::filesystem::path const new_path
                             = path_base / new_name;
 
+                        LOG_TRACE_L1(
+                            "Path base: '{}'\nOld path: '{}'\nNew path: "
+                            "'{}'\nNew name: '{}'",
+                            path_base, old_path, new_path, new_name);
+
                         TRY_OR_CO_RETURN_VOID_TRANSFORM_ERROR(
                             co_await gyou::string_to_file(
                                 ioc, editted_ebuild_content, old_path),
@@ -103,6 +109,11 @@ namespace gyou
                 [&](gyou::EditVerOrTag const& diff_details)
                     -> corral::Task<std::expected<void, std::string>>
                     {
+                        LOG_TRACE_L2(
+                            "{}\ns/{}/{}",
+                            diff_info.path_to_ebuild.filename().string(),
+                            diff_details.old_ver, diff_details.new_ver);
+
                         std::string const new_name = gyou::Replace(
                             diff_info.path_to_ebuild.filename().string(),
                             diff_details.old_ver, diff_details.new_ver);
@@ -119,6 +130,11 @@ namespace gyou
                             = path_base / diff_info.path_to_ebuild.filename();
                         std::filesystem::path const new_path
                             = path_base / new_name;
+
+                        LOG_TRACE_L1(
+                            "Path base: '{}'\nOld path: '{}'\nNew path: "
+                            "'{}'\nNew name: '{}'",
+                            path_base, old_path, new_path, new_name);
 
                         // this probably should be recoded via async rename
                         // via liburing or whatever
@@ -141,9 +157,9 @@ namespace gyou
                             "ebuild: {}",
                             diff_info.path_to_ebuild);
 
-                        TRY_OR_CO_RETURN(
+                        TRY_OR_CO_RETURN_VOID(
                             co_await gyou::bash_ebuild_manifest_update(
-                                ioc, cfg, new_path, diff_details.new_ver));
+                                ioc, cfg, new_path));
 
                         LOG_INFO(
                             "Presumably updated manifest for the ebuild: {}",

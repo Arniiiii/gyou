@@ -5,3 +5,5 @@ tags
 .DS_Store
 /.cache
 CMakeUserPresets.json
+!.vscode/
+!launch.json

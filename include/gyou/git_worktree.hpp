@@ -13,6 +13,7 @@
 #include <corral/asio.h>
 #include <corral/corral.h>
 #include <fmt/format.h>
+#include <fmt/std.h>
 
 #include "gyou/structs/config.hpp"
 #include "overwrite_log_macros.hpp"
@@ -20,7 +21,7 @@
 namespace gyou
 {
     [[nodiscard]] corral::Task<std::expected<void, std::string>>
-    git_create_worktree(auto& ioc, gyou::Config const& cfg,
+    git_create_worktree(boost::asio::io_context& ioc, gyou::Config const& cfg,
                         std::filesystem::path const& path_to_git,
                         std::filesystem::path const folder_path,
                         std::string const branch_name)

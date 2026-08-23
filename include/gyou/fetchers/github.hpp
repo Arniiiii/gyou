@@ -24,6 +24,7 @@
 #include "gyou/http_requests.hpp"
 #include "gyou/rss_parse_into_tree.hpp"
 #include "gyou/structs/change_related/commit_specific.hpp"
+#include "gyou/structs/common_ctx.hpp"
 #include "gyou/structs/ebuild_parsed_data.hpp"
 #include "overwrite_log_macros.hpp"
 
@@ -31,8 +32,9 @@ namespace gyou
 {
     [[nodiscard]] corral::Task<std::expected<
         std::variant<gyou::CommitSpecific, std::string>, std::string>>
-    github_fetch_version(auto& ioc, auto& semaphores,
-                         gyou::EbuildSpecificData const& ebuild_data)
+    github_fetch_version(boost::asio::io_context& ioc, auto& semaphores,
+                         gyou::EbuildSpecificData const& ebuild_data,
+                         gyou::CommonContext& common_ctx)
     {
         std::string new_version{};
         std::string new_commit{};
@@ -158,7 +160,66 @@ namespace gyou
                     commit_version_or_tag);
                 if (is_tag or not ebuild_data.commit_specific.has_value())
                     {
-                        new_version = std::move(commit_version_or_tag);
+                        // boost specific hack: boost for releases uses tags.
+                        // OK, but the problem is that the tag is in format
+                        // `boost-1.92;0`, not `1.92.0`. Boost, just WHY, for
+                        // the fuck sake?
+                        //  same thing for cppgenerate...
+                        // fuck... 25 lines of regex shit because of fucking
+                        // boost and cppgenerate... AAAA FUCK FUCK FUCK
+
+                        common_ctx.re_package_version_matcher.input(
+                            commit_version_or_tag);
+                        if (not common_ctx.re_package_version_matcher.find())
+                            {
+                                co_return std::unexpected(
+                                    fmt::format("Failed to parse version of "
+                                                "fetched version : {}",
+                                                new_version));
+                            }
+
+                        size_t match_id = 0;
+                        while (common_ctx.re_package_version_matcher[match_id]
+                                   .first
+                               != nullptr)
+                            {
+                                LOG_TRACE_L2("sth: {}",
+                                             std::string_view{
+                                                 common_ctx
+                                                     .re_package_version_matcher
+                                                         [match_id]
+                                                     .first,
+                                                 common_ctx
+                                                     .re_package_version_matcher
+                                                         [match_id]
+                                                     .second});
+                                if (common_ctx
+                                        .re_package_version_matcher[match_id]
+                                        .first
+                                    == nullptr)
+                                    {
+                                        LOG_DEBUG("It is nullptr.");
+                                    }
+                                ++match_id;
+                            }
+                        if (match_id == 1)
+                            {
+                                new_version = std::string{
+                                    common_ctx.re_package_version_matcher[0]
+                                        .first,
+                                    common_ctx.re_package_version_matcher[0]
+                                        .second};
+                            }
+                        else
+                            {
+                                new_version = std::string{
+                                    common_ctx.re_package_version_matcher[2]
+                                        .first,
+                                    common_ctx.re_package_version_matcher[2]
+                                        .second};
+                            }
+
+                        LOG_DEBUG("Parsed new ver: '{}'", new_version);
                     }
                 else
                     {

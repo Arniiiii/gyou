@@ -23,7 +23,7 @@ constexpr auto HTTP_MAX_TIME_TIMEOUT_RFC = std::chrono::seconds(120);
 constexpr int HTTP_VERSION_TO_USE = 11;
 
 corral::Task<std::expected<std::string, std::string>> typical_http_request(
-    auto& ioc, std::string const& request_body, const boost::url& url,
+    boost::asio::io_context & ioc, std::string const& request_body, const boost::url& url,
     boost::beast::http::verb method, boost::beast::http::fields headers)
 {
     auto resolver = boost::asio::ip::tcp::resolver{ioc};
@@ -110,7 +110,7 @@ corral::Task<std::expected<std::string, std::string>> typical_http_request(
 }
 
 corral::Task<std::expected<std::string, std::string>> typical_https_request(
-    auto& ioc, std::string const& request_body, boost::url const& url,
+    boost::asio::io_context & ioc, std::string const& request_body, boost::url const& url,
     boost::beast::http::verb method, const boost::beast::http::fields& headers)
 {
     boost::asio::ssl::context sslCtx(boost::asio::ssl::context::tlsv13);
@@ -234,7 +234,7 @@ corral::Task<std::expected<std::string, std::string>> typical_https_request(
 }
 
 corral::Task<std::expected<std::string, std::string>> request_internet(
-    auto& ioc, std::string const& request_body, boost::urls::url const& url,
+    boost::asio::io_context & ioc, std::string const& request_body, boost::urls::url const& url,
     boost::beast::http::verb method,
     boost::beast::http::header<true> const& headers)
 {

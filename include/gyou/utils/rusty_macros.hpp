@@ -1,6 +1,8 @@
 #ifndef INCLUDE_UTILS_RUSTY_MACROS_HPP_
 #define INCLUDE_UTILS_RUSTY_MACROS_HPP_
 
+#include <utility>
+
 /* NOLINTNEXTLINE(cppcoreguidelines-macro-usage) */
 #define TRY_OR_CO_RETURN(expr)                                      \
     __extension__({                                                 \

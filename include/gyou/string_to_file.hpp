@@ -1,20 +1,24 @@
 #ifndef INCLUDE_GYOU_STRING_TO_FILE_HPP_
 #define INCLUDE_GYOU_STRING_TO_FILE_HPP_
 
+#include <expected>
+#include <filesystem>
+
 #include <boost/asio/basic_stream_file.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/write.hpp>
 #include <boost/asio/stream_file.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/date_time.hpp>
 #include <corral/asio.h>
 #include <corral/corral.h>
 #include <corral/detail/asio.h>
 
 #include "gyou/utils/omega_exception.hpp"
-namespace gyou {
+namespace gyou
+{
 
     [[nodiscard]] corral::Task<std::expected<void, boost::system::error_code>>
-    string_to_file(auto& ioc, std::string const& content,
+    string_to_file(boost::asio::io_context& ioc, std::string const& content,
                    std::filesystem::path const& file_path)
     {
         if (not std::filesystem::exists(file_path))
@@ -37,6 +41,6 @@ namespace gyou {
             }
         co_return {};
     }
-}
+}  // namespace gyou
 
 #endif  // INCLUDE_GYOU_STRING_TO_FILE_HPP_

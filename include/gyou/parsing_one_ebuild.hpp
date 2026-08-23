@@ -26,7 +26,7 @@ namespace gyou
     //  return what to change
     [[nodiscard]] corral::Task<
         std::expected<std::optional<InfoForDiff>, std::string>>
-    logic_per_ebuild(auto& ioc, gyou::Config const& cfg,
+    logic_per_ebuild(boost::asio::io_context & ioc, gyou::Config const& cfg,
                      std::filesystem::directory_entry const& path_to_ebuild,
                      auto& semaphores, gyou::CommonContext& common_ctx)
     {

@@ -31,7 +31,7 @@ namespace gyou
     // current pkg extract service and link
     [[nodiscard]] corral::Task<
         std::expected<gyou::EbuildSpecificData, std::string>>
-    get_ebuild_info(auto& ioc, gyou::Config const& cfg,
+    get_ebuild_info(boost::asio::io_context & ioc, gyou::Config const& cfg,
                     gyou::CommonContext& common_ctx,
                     std::filesystem::directory_entry const& path_to_ebuild)
     {

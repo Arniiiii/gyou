@@ -22,7 +22,7 @@ namespace gyou
 {
 
     [[nodiscard]] corral::Task<gyou::PackagesToUpdate> get_what_to_change(
-        auto& ioc, gyou::Config const& cfg, auto& semaphores,
+        boost::asio::io_context & ioc, gyou::Config const& cfg, auto& semaphores,
         gyou::CommonContext& common_ctx)
     {
         gyou::PackagesToUpdate changes;

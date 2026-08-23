@@ -23,7 +23,7 @@ namespace gyou
 
     [[nodiscard]] corral::Task<
         std::expected<std::filesystem::path, std::string>>
-    bash_ebuild(auto& ioc, gyou::Config const& cfg,
+    bash_ebuild(boost::asio::io_context & ioc, gyou::Config const& cfg,
                 std::filesystem::path const& path_to_ebuild,
                 std::string_view const pv)
     {

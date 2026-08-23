@@ -29,8 +29,8 @@ namespace gyou
     // check for update
     [[nodiscard]] corral::Task<std::expected<
         std::variant<gyou::CommitSpecific, std::string>, std::string>>
-    get_latest_info(auto& ioc, gyou::Config const& cfg, auto& semaphores,
-                    gyou::CommonContext& common_ctx,
+    get_latest_info(boost::asio::io_context& ioc, gyou::Config const& cfg,
+                    auto& semaphores, gyou::CommonContext& common_ctx,
                     gyou::EbuildSpecificData const& ebuild_data)
     {
         // what is url of a feed for the service and the package? is it per tag,
@@ -46,7 +46,7 @@ namespace gyou
                 case gyou::Service::github:
                     {
                         auto fetched_res = co_await gyou::github_fetch_version(
-                            ioc, semaphores, ebuild_data);
+                            ioc, semaphores, ebuild_data, common_ctx);
                         if (not fetched_res)
                             {
                                 co_return std::unexpected(fetched_res.error());
