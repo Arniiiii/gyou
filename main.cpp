@@ -108,7 +108,8 @@ namespace
     }
 
     [[nodiscard]] corral::Task<gyou::ReturnCode> chief_logic(
-        boost::asio::io_context& ioc, gyou::Config const& cfg, auto& semaphores,
+        boost::asio::io_context& ioc, gyou::Config const& cfg,
+        gyou::semaphores_array_type& semaphores,
         gyou::CommonContext& common_ctx)
     {
         gyou::PackagesToUpdate const changes
@@ -488,7 +489,7 @@ namespace
                                 re_set_services.Add(service, nullptr);
                             }
                         re_set_services.Compile();
-                        return std::move(re_set_services);
+                        return re_set_services;
                     }),
             .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
             .re_package_version_matcher

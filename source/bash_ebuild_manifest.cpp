@@ -7,19 +7,20 @@
 #include <boost/process.hpp>
 #include <boost/process/v2/environment.hpp>
 #include <corral/asio.h>
+#include <corral/wait.h>
 #include <fmt/format.h>
 #include <quill/std/Vector.h>
 
-#include "gyou/utils/boost_process_fmt.hpp"
+#include "gyou/utils/boost_process_fmt.hpp"  // IWYU pragma: keep
 #include "overwrite_log_macros.hpp"
 
 namespace gyou
 {
 
     [[nodiscard]] corral::Task<std::expected<void, std::string>>
-    bash_ebuild_manifest_update(
-        boost::asio::io_context& ioc, gyou::Config const& cfg,
-        std::filesystem::path const& path_to_ebuild_file)
+    ebuild_manifest_update(boost::asio::io_context& ioc,
+                           gyou::Config const& cfg,
+                           std::filesystem::path const& path_to_ebuild_file)
     {
         std::string pkg_full_name
             = path_to_ebuild_file.filename().stem().string();

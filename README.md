@@ -93,15 +93,16 @@ Finally run the project:
                 - [ ] check whether all of them are relevant to current situation
 
 - [ ] maintenance
-    - [ ] improve warm compile time
+    - [x] improve warm compile time
         - [x] find out how to get statistics of on what code it wastes most of the time
             - `-ftime-trace`
             - actually, 30 seconds on frontend parsing and 30 seconds on backend optimizing, ASAN etc. + linking, but I have no idea how long is linking with mold and whether it is possible to optimize this.
-        - [ ] try moving the code to separate module or header + source file
+        - [x] try moving the code to separate module or header + source file
             - no modules until 2030.
-            - [ ] seems useless since most stuff are either functions with `auto` or explicit templates.
+            - [x] seems useless since most stuff are either functions with `auto` or explicit templates.
+                - made it less template-ish
     - [ ] CI
-        - [ ] how it should look like? This project does not even have auto tests.
+        - [ ] how should it look like? This project does not even have auto tests.
     
 
 
