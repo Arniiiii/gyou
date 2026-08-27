@@ -94,7 +94,7 @@ namespace gyou
                                     corral::asio_nothrow_awaitable));
         auto&& [_, errc_proc] = proc_tuple;
 
-        LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
+        LOG_TRACE_L2("`{}`\nstdout:\n{}\n\nstderr:\n{}", exe_representation,
                      stdout_s, stderr_s);
 
         if (errc_proc != 0)
