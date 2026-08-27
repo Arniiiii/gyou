@@ -11,7 +11,7 @@ namespace gyou
 
     // Fucking C++ without C99 designated array initializer extension makes me
     // do this shit.
-    constexpr auto ServicesNames
+    inline constexpr auto ServicesNames
         = gyou::ArrayBuilder<std::string_view>()
               .e<Service::bitbucket>("https://bitbucket.org/.*?")
               .e<Service::codeberg>("https://codeberg.org/.*?")

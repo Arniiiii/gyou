@@ -38,7 +38,7 @@ namespace gyou
     {
         std::vector<InfoForDiff> what_to_change;
         bool is_any_successful = false;
-        bool is_any_failed = false;
+        bool has_any_failed = false;
     };
 }  // namespace gyou
 

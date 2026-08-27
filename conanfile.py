@@ -1,7 +1,7 @@
 from conan import ConanFile
 
 
-class CompressorRecipe(ConanFile):
+class GyouRecipe(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeToolchain", "CMakeDeps"
     
@@ -16,11 +16,10 @@ class CompressorRecipe(ConanFile):
         self.requires("corral/[~0]")
         self.requires("openssl/[~3]")
         self.requires("boost/[>=1.88.0]")
-        # self.requires("gtest/[~1]")
+        self.requires("gtest/[~1]")
         self.requires("fmt/[~12]")
         self.requires("cli11/[~2]")
         self.requires("magic_enum/[~0]")
-        self.requires("inja/[~3]")
         self.requires("quill/[~11]")
         self.requires("glaze/[~7]")
         self.requires("re2/20251105") 

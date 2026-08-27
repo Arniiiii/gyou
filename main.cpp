@@ -41,6 +41,7 @@
 #include <boost/url.hpp>
 #include <corral/Nursery.h>
 #include <corral/Semaphore.h>
+#include <corral/Task.h>
 #include <corral/asio.h>
 #include <corral/corral.h>
 #include <corral/detail/asio.h>
@@ -53,10 +54,6 @@
 #include <fmt/ostream.h>
 #include <fmt/printf.h>
 #include <fmt/std.h>
-#include <glaze/glaze.hpp>
-#include <inja/environment.hpp>
-#include <inja/inja.hpp>
-#include <inja/json.hpp>
 #include <magic_enum/magic_enum.hpp>
 #include <quill/core/LogLevel.h>
 #include <quill/std/Chrono.h>
@@ -68,8 +65,10 @@
 
 #include "gyou/apply_change.hpp"
 #include "gyou/bash_ebuild_manifest.hpp"
+#include "gyou/common_ctx_create.hpp"
 #include "gyou/file_to_string.hpp"
 #include "gyou/get_what_to_change.hpp"
+#include "gyou/git_fetch.hpp"
 #include "gyou/git_worktree.hpp"
 #include "gyou/parsing_groupsci.hpp"
 #include "gyou/string_to_file.hpp"
@@ -93,19 +92,19 @@
 namespace
 {
 
-    [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
-    gh_create_pr(boost::asio::io_context& ioc, gyou::Config const& cfg,
-                 std::filesystem::path const& path_to_gh,
-                 std::filesystem::path const& folder_path,
-                 std::string const& branch_name)
-    {
-        // check if authorized in any account via `gh auth status` and regex
-        // `Logged in to github.com account`
-
-        // somehow check whether we need a pr
-
-        // create pr
-    }
+    // [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
+    // gh_create_pr(boost::asio::io_context& ioc, gyou::Config const& cfg,
+    //              std::filesystem::path const& path_to_gh,
+    //              std::filesystem::path const& folder_path,
+    //              std::string const& branch_name)
+    // {
+    //     // check if authorized in any account via `gh auth status` and regex
+    //     // `Logged in to github.com account`
+    //
+    //     // somehow check whether we need a pr
+    //
+    //     // create pr
+    // }
 
     [[nodiscard]] corral::Task<gyou::ReturnCode> chief_logic(
         boost::asio::io_context& ioc, gyou::Config const& cfg,
@@ -239,17 +238,8 @@ namespace
             path_to_git_;
         });
 
-        std::filesystem::path const path_to_gh = __extension__({
-            auto path_to_gh_
-                = boost::process::environment::find_executable("gh");
-            if (path_to_gh_.empty())
-                {
-                    LOG_ERROR(
-                        "Failed to find 'gh' executable in your environment.");
-                    co_return gyou::ReturnCode::FailedToFindGh;
-                }
-            path_to_gh_;
-        });
+        boost::process::v2::filesystem::path git_exe_path
+            = boost::process::environment::find_executable("git");
 
         std::optional<gyou::ReturnCode> return_code;
         CORRAL_WITH_NURSERY(nursery)
@@ -409,6 +399,23 @@ namespace
                             });
                 }
 
+            nursery.start(
+                [&]() -> corral::Task<void>
+                    {
+                        auto res
+                            = co_await gyou::git_fetch(ioc, cfg, git_exe_path);
+                        if (not res)
+                            {
+                                LOG_ERROR(
+                                    "`git fetch --all` has failed. It's "
+                                    "output:\n{}",
+                                    std::move(res.error()));
+                                return_code = gyou::ReturnCode::FailedGitFetch;
+                                nursery.cancel();
+                                co_return;
+                            }
+                    });
+
             co_return corral::join;
         };
 
@@ -417,11 +424,11 @@ namespace
                 co_return return_code.value();
             }
 
-        if (changes.is_any_failed and changes.is_any_successful)
+        if (changes.has_any_failed and changes.is_any_successful)
             {
                 co_return gyou::ReturnCode::PartialSuccess;
             }
-        else if (changes.is_any_failed and not changes.is_any_successful)
+        else if (changes.has_any_failed and not changes.is_any_successful)
             {
                 co_return gyou::ReturnCode::AllHaveFailed;
             }
@@ -448,53 +455,7 @@ namespace
                 [concurrency_per_service = cfg.concurrency_per_service]()
                     { return corral::Semaphore(concurrency_per_service); });
 
-        // to compile them all at once
-        // NOLINTBEGIN(hicpp-signed-bitwise)
-        std::string str_re_versions = reflex::PCRE2UTFMatcher::convert(
-            R"(([\w][\w+-]*?)-((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
-            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
-        // NOLINTEND(hicpp-signed-bitwise)
-
-        const reflex::PCRE2UTFMatcher::Pattern& pattern_re_versions(
-            str_re_versions);
-
-        // NOLINTBEGIN(hicpp-signed-bitwise)
-        std::string str_package_re_versions = reflex::PCRE2UTFMatcher::convert(
-            R"(([\w][\w+-]*?-)?((\d+)(\.\d+)*)([a-z]?)((_(pre|p|beta|alpha|rc)\d*)*)(-r(\d+))?)",
-            reflex::convert_flag::unicode | reflex::convert_flag::notnewline);
-        // NOLINTEND(hicpp-signed-bitwise)
-
-        const reflex::PCRE2UTFMatcher::Pattern& pattern_package_re_versions(
-            str_package_re_versions);
-
-        gyou::CommonContext common_ctx{
-            .re_commit_str = RE2(
-                R"delimiter(declare -- ([a-zA-Z_]?[a-zA-Z0-9_]*?COMMIT[a-zA-Z0-9_]*?)="([0-9a-f]{40})"\n)delimiter",
-                RE2::Quiet),
-            .re_src_uri = RE2(
-                R"delimiter(declare SRC_URI=\$?["'](?:\\n)?(?:\\t)?(?:\s*)?(https?://\S*).*?['"])delimiter",
-                RE2::Quiet),
-
-            .re_category = RE2(R"(([\w][\w+.-]*))", RE2::Quiet),
-            .re_pkg_9999 = RE2(R"([\w+.-]*9999)", RE2::Quiet),
-
-            .re_pkg_with_date = RE2(R"([\w+.-]+?(\d{8})[\w+.-]*?)", RE2::Quiet),
-            .re_set_services = std::invoke(
-                []()
-                    {
-                        RE2::Set re_set_services(RE2::DefaultOptions,
-                                                 RE2::Anchor::UNANCHORED);
-                        for (auto&& service : gyou::ServicesNames)
-                            {
-                                re_set_services.Add(service, nullptr);
-                            }
-                        re_set_services.Compile();
-                        return re_set_services;
-                    }),
-            .re_version_matcher = reflex::PCRE2UTFMatcher(pattern_re_versions),
-            .re_package_version_matcher
-            = reflex::PCRE2UTFMatcher(pattern_package_re_versions),
-        };
+        gyou::CommonContext common_ctx = gyou::create_common_ctx();
 
         gyou::ReturnCode res = co_await chief_logic(
             ioc, cfg, semaphores_per_services, common_ctx);

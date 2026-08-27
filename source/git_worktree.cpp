@@ -29,9 +29,11 @@ namespace gyou
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
-        LOG_DEBUG("Presumably running next command: '{}'",
-                  fmt::format("{} worktree add -b {} {} {}", path_to_git,
-                              branch_name, folder_path, cfg.main_branch_name));
+        std::string const exe_representation
+            = fmt::format("{} worktree add -b {} {} {}", path_to_git,
+                          branch_name, folder_path, cfg.main_branch_name);
+
+        LOG_DEBUG("Presumably running next command: '{}'", exe_representation);
 
         auto proc = boost::process::process(
             ioc, path_to_git.string(),
@@ -57,6 +59,8 @@ namespace gyou
                                     corral::asio_nothrow_awaitable));
         auto&& [_, errc_proc] = proc_tuple;
 
+        LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
+                     stdout_s, stderr_s);
         if (errc_proc != 0)
             {
                 co_return std::unexpected(

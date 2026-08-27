@@ -87,9 +87,11 @@ namespace gyou
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
+        std::string const exe_representation
+            = (cfg.path_to_portage_bin / "ebuild").string() + " "
+              + path_to_ebuild_file.string() + " manifest";
         LOG_TRACE_L1("Presumably running next command: '{}'",
-                     (cfg.path_to_portage_bin / "ebuild").string() + " "
-                         + path_to_ebuild_file.string() + " manifest");
+                     exe_representation);
 
         auto const path_to_ebuild_py_exe = cfg.path_to_portage_bin / "ebuild";
 
@@ -115,6 +117,9 @@ namespace gyou
                                     boost::asio::dynamic_buffer(stderr_s),
                                     corral::asio_nothrow_awaitable));
         auto&& [_, errc_proc] = proc_tuple;
+
+        LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
+                     stdout_s, stderr_s);
 
         if (errc_proc != 0)
             {

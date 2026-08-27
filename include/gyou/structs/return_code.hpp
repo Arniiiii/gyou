@@ -26,6 +26,7 @@ namespace gyou
         FailedMakingGitToMakeWorktrees = 16,
         FailedApplyChange = 17,
         FailedGhIsNotLoggedIn = 18,
+        FailedGitFetch = 19,
 
     };
 }  // namespace gyou

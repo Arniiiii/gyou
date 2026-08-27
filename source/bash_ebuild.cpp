@@ -22,9 +22,10 @@ namespace gyou
 
     [[nodiscard]] corral::Task<
         std::expected<std::filesystem::path, std::string>>
-    bash_ebuild_generate_environment_file(boost::asio::io_context& ioc, gyou::Config const& cfg,
-                std::filesystem::path const& path_to_ebuild,
-                std::string_view const package_version)
+    bash_ebuild_generate_environment_file(
+        boost::asio::io_context& ioc, gyou::Config const& cfg,
+        std::filesystem::path const& path_to_ebuild,
+        std::string_view const package_version)
     {
         std::string pkg_full_name = path_to_ebuild.filename().stem().string();
         std::string pkg_name = path_to_ebuild.parent_path().filename().string();
@@ -63,9 +64,10 @@ namespace gyou
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
-        LOG_DEBUG("Presumably running next command: '{}'",
-                  (cfg.path_to_portage_bin / "ebuild.sh").string() + " "
-                      + "_internal_test" + " " + path_to_ebuild.string());
+        std::string const exe_representation
+            = (cfg.path_to_portage_bin / "ebuild.sh").string() + " "
+              + "_internal_test" + " " + path_to_ebuild.string();
+        LOG_DEBUG("Presumably running next command: '{}'", exe_representation);
 
         auto const path_to_ebuild_sh = cfg.path_to_portage_bin / "ebuild.sh";
 
@@ -91,6 +93,9 @@ namespace gyou
                                     boost::asio::dynamic_buffer(stderr_s),
                                     corral::asio_nothrow_awaitable));
         auto&& [_, errc_proc] = proc_tuple;
+
+        LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
+                     stdout_s, stderr_s);
 
         if (errc_proc != 0)
             {

@@ -3,13 +3,15 @@ macro(set_common_compile_options target_name)
     target_compile_options(${target_name}
                        PUBLIC "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->")
 
-    set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 26)
+    set_target_properties(${target_name} PROPERTIES CXX_STANDARD 26)
 
     if(${${PROJECT_NAME}_ENABLE_WARNINGS})
         include(${CMAKE_CURRENT_LIST_DIR}/cmake/warnings.cmake)
         set_project_warnings(${target_name})
     endif()
 
+    target_compile_options(${target_name}
+        PUBLIC -ggdb3)
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(${target_name}

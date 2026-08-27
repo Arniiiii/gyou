@@ -88,7 +88,7 @@ namespace gyou
                                                         semaphores, common_ctx);
                                                 if (not sth)
                                                     {
-                                                        changes.is_any_failed
+                                                        changes.has_any_failed
                                                             = true;
                                                         LOG_ERROR(
                                                             "Failed to do "
