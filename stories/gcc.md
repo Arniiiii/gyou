@@ -1,6 +1,6 @@
 # The project is not compilable with GCC
 
-I wanted to write a little bit more safe code with const correctness and etc. Also, I already once had a memory bug because of it.
+I wanted to write a little bit more safe code with const correctness etc. Also, I already once had a memory bug because of it.
 
 So, what is the problem?
 
