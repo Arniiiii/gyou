@@ -48,7 +48,7 @@ Get patched portage:
 
 Finally run the project:
 
-`./build/gyou-0.0.0.2 --log-file console --log-level tracel1 --repo-path /home/donald/data/code/mygentoo/ex_repo --tmp-path /tmp/tmp_gyou/ --portage-bin-path /home/donald/data/code/experiments/portage/bin/ --portage-pym-path /tmp/tmp_gyou/ `
+`./build/gyou --log-file console --log-level tracel1 --repo-path /home/donald/data/code/mygentoo/ex_repo --tmp-path /tmp/tmp_gyou/ --portage-bin-path /home/donald/data/code/experiments/portage/bin/ --portage-pym-path /tmp/tmp_gyou/ `
 
 ## TODO
 
@@ -69,6 +69,7 @@ Finally run the project:
             - `git worktree add -b branch_test/worktree ./test_worktree master`
         - [x] applying changes
             - [x] applying changes in groups
+                - done via adding a JSON file like `[ ["pkg-cat/pkg-name", "pkg-cat2/pkg-name2"], [...] , ... ]` in repo's `./groups-ci.json`
             - [x] manifest update for changes that are version-like
         - [ ] pr logic
             - [ ] check if branch with same name exists on remote
