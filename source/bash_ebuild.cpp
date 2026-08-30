@@ -15,6 +15,7 @@
 #include <fmt/format.h>
 
 #include "gyou/structs/config.hpp"
+#include "gyou/structs/portage_ver.hpp"
 #include "overwrite_log_macros.hpp"
 
 namespace gyou
@@ -25,10 +26,9 @@ namespace gyou
     bash_ebuild_generate_environment_file(
         boost::asio::io_context& ioc, gyou::Config const& cfg,
         std::filesystem::path const& path_to_ebuild,
-        std::string_view const package_version)
+        gyou::ParsedEbuildStem const& ebuild_name_parts)
     {
         std::string pkg_full_name = path_to_ebuild.filename().stem().string();
-        std::string pkg_name = path_to_ebuild.parent_path().filename().string();
         std::string category
             = path_to_ebuild.parent_path().parent_path().filename().string();
 
@@ -44,22 +44,45 @@ namespace gyou
                     errc_mkdir_p.message()));
             };
 
-        std::unordered_map<boost::process::environment::key,
-                           boost::process::environment::value>
-            env_for_ebuild = {
-                {"EBUILD", path_to_ebuild.string()},
-                {"T", temp_folder.string()},
-                {"PORTAGE_BIN_PATH", cfg.path_to_portage_bin.string()},
-                {"PORTAGE_PYM_PATH", cfg.path_to_portage_pym.string()},
-                {"PORTAGE_ECLASS_LOCATIONS_STR",
-                 cfg.path_to_gentoo_repo.string() + ":"
-                     + cfg.path_to_repo.string()},
-                {"EBUILD_PHASE", "_internal_test"},
-                {"CATEGORY", category},
-                {"PF", pkg_full_name},
-                {"PN", pkg_name},
-                {"PV", package_version},
-            };
+        std::string const rev
+            = ebuild_name_parts.rev.empty()
+                  ? "-r0"
+                  : fmt::format("-r{}", ebuild_name_parts.rev);
+
+        auto cur_env = boost::process::environment::current();
+
+        std::vector<boost::process::environment::key_value_pair> env_for_ebuild{
+            cur_env.begin(), cur_env.end()};
+
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "EBUILD", path_to_ebuild.string()));
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "T", temp_folder.string()));
+        // env_for_ebuild.emplace_back(
+        //     fmt::format("{}={}", "PORTAGE_TMPDIR", temp_folder.string()));
+        env_for_ebuild.emplace_back(fmt::format(
+            "{}={}", "PORTAGE_BIN_PATH", cfg.path_to_portage_bin.string()));
+        env_for_ebuild.emplace_back(fmt::format(
+            "{}={}", "PORTAGE_PYM_PATH", cfg.path_to_portage_pym.string()));
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "PORTAGE_ECLASS_LOCATIONS_STR",
+                        cfg.path_to_gentoo_repo.string() + ":"
+                            + cfg.path_to_repo.string()));
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "EBUILD_PHASE", "_internal_test"));
+        env_for_ebuild.emplace_back(fmt::format("{}={}", "CATEGORY", category));
+        env_for_ebuild.emplace_back(fmt::format("{}={}", "PF", pkg_full_name));
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "PN", ebuild_name_parts.pn));
+        env_for_ebuild.emplace_back(
+            fmt::format("{}={}", "PV", ebuild_name_parts.ver));
+        env_for_ebuild.emplace_back(fmt::format(
+            "{}={}", "P",
+            fmt::format("{}{}", ebuild_name_parts.pn, ebuild_name_parts.ver)));
+        env_for_ebuild.emplace_back(fmt::format(
+            "{}={}", "PVR", fmt::format("{}{}", ebuild_name_parts.ver, rev)));
+        env_for_ebuild.emplace_back(fmt::format(
+            "{}={}", "PVR", fmt::format("{}{}", ebuild_name_parts.ver, rev)));
 
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
@@ -92,16 +115,16 @@ namespace gyou
             boost::asio::async_read(rp_stderr,
                                     boost::asio::dynamic_buffer(stderr_s),
                                     corral::asio_nothrow_awaitable));
-        auto&& [_, errc_proc] = proc_tuple;
+        auto&& [_, status_code_proc] = proc_tuple;
 
         LOG_TRACE_L2("`{}`\nstdout:\n{}\n\nstderr:\n{}", exe_representation,
                      stdout_s, stderr_s);
 
-        if (errc_proc != 0)
+        if (status_code_proc != 0)
             {
                 co_return std::unexpected(fmt::format(
                     "Failed to do ebuild: ec: {}\nstderr: {}\nstdout: {}",
-                    errc_proc, stderr_s, stdout_s));
+                    status_code_proc, stderr_s, stdout_s));
             }
 
         co_return temp_folder;

@@ -13,9 +13,9 @@ namespace gyou
     struct EbuildSpecificData
     {
         std::filesystem::path filepath;
-        std::string p;
-        std::string pv;
         std::string pn;
+        std::string ver;
+        std::string rev;
         std::string category;
         std::string first_uri;
         std::optional<gyou::EbuildCommitSpecific> commit_specific;

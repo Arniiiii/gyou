@@ -149,7 +149,7 @@ namespace
                     LOG_ERROR(
                         "Got error during getting the groups-ci.json file : "
                         "'{}'",
-                        std::move(res.error().message()));
+                        res.error().message());
                     co_return gyou::ReturnCode::FailedReadingGroupCiFile;
                 };
             std::move(res.value());

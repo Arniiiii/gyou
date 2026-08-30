@@ -1,36 +1,28 @@
-#include "gyou/tag_to_portage_versions.hpp"
+#include "gyou/parse_portage_ver.hpp"
 
-#include <expected>
+#include <optional>
+#include <string>
 
-#include <fmt/format.h>
 #include <reflex/pcre2matcher.h>
 
+#include "gyou/consts/pcre2_regex_portage_ver.hpp"
+#include "gyou/structs/portage_ver.hpp"
 #include "overwrite_log_macros.hpp"
 
 namespace gyou
 {
-
-    std::expected<std::string, std::string> tag_to_portage_version(
-
-        reflex::PCRE2UTFMatcher& re_package_version_matcher,
-        std::string const& tag_or_version)
+    std::optional<gyou::ParsedEbuildStem> parse_ebuild_name(
+        reflex::PCRE2UTFMatcher& re_portage_version_matcher,
+        std::string const& ebuild_stem)
     {
-        // time wasted: 5 hours.
-        // re-flex's API is un-intuitive.
-
         // Probably this loop should be rewritten into a perfect hash map.
-
-        std::string portage_version{};
-
         bool have_we_entered_the_ugly_loop = false;
 
-        re_package_version_matcher.input(tag_or_version);
+        re_portage_version_matcher.input(ebuild_stem);
 
-        std::string ver{};
-        std::string tag{};
-        std::string subver{};
+        ParsedEbuildStem res;
 
-        for (auto& match : re_package_version_matcher.find)
+        for (auto& match : re_portage_version_matcher.find)
             {
                 have_we_entered_the_ugly_loop = true;
                 std::pair<const char*, size_t> subpattern;
@@ -46,30 +38,40 @@ namespace gyou
                             "sth named '{}': '{}'", grp_id.second,
                             std::string_view(match[grp_id.first].first,
                                              match[grp_id.first].second));
+                        if (strcmp(grp_id.second, "pn") == 0)
+                            {
+                                subpattern = match[grp_id.first];
+                                res.pn = std::string(subpattern.first,
+                                                     subpattern.second);
+                                grp_id = match.group_next_id();
+                                continue;
+                            }
+
+                        if (strcmp(grp_id.second, "pn_inval") == 0)
+                            {
+                                subpattern = match[grp_id.first];
+                                res.pn_inval = std::string(subpattern.first,
+                                                           subpattern.second);
+
+                                grp_id = match.group_next_id();
+                                continue;
+                            }
+
                         if (strcmp(grp_id.second, "ver") == 0)
                             {
                                 subpattern = match[grp_id.first];
-                                ver = std::string(subpattern.first,
-                                                  subpattern.second);
-                                grp_id = match.group_next_id();
-                                continue;
-                            }
-
-                        if (strcmp(grp_id.second, "tag") == 0)
-                            {
-                                subpattern = match[grp_id.first];
-                                tag = std::string(subpattern.first,
-                                                  subpattern.second);
+                                res.ver = std::string(subpattern.first,
+                                                      subpattern.second);
 
                                 grp_id = match.group_next_id();
                                 continue;
                             }
 
-                        if (strcmp(grp_id.second, "subver") == 0)
+                        if (strcmp(grp_id.second, "rev") == 0)
                             {
                                 subpattern = match[grp_id.first];
-                                subver = std::string(subpattern.first,
-                                                     subpattern.second);
+                                res.rev = std::string(subpattern.first,
+                                                      subpattern.second);
 
                                 grp_id = match.group_next_id();
                                 continue;
@@ -81,24 +83,9 @@ namespace gyou
 
         if (not have_we_entered_the_ugly_loop)
             {
-                return std::unexpected(
-                    fmt::format("Failed to parse version of "
-                                "fetched version : {}",
-                                tag_or_version));
+                return std::nullopt;
             }
 
-        if (not tag.empty())
-            {
-                tag = "-" + tag;
-            }
-        if (not subver.empty())
-            {
-                subver = "-" + subver;
-            }
-
-        portage_version = fmt::format("{}{}{}", ver, tag, subver);
-
-        return portage_version;
+        return res;
     }
-
 }  // namespace gyou

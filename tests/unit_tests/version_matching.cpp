@@ -1,5 +1,3 @@
-// tests/foo_test.cpp
-
 #include <string>
 
 #include <gtest/gtest.h>
@@ -12,7 +10,7 @@
 #include "gyou/tag_to_portage_versions.hpp"
 #include "quill_static.hpp"
 
-TEST(ParsingTags, ParsingSomeTags)
+TEST(Parsing, ParsingSomeTags)
 {
     try
         {

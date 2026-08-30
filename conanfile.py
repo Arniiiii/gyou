@@ -7,6 +7,8 @@ class GyouRecipe(ConanFile):
     
     def configure(self):
         self.options["boost"].with_stacktrace = True
+        # self.options["boost"].with_stacktrace_backtrace = True
+        # self.options["boost"].stacktrace_backend = "backtrace"
         self.options["boost"].without_url = False
         self.options["boost"].without_cobalt = True
         self.options["boost"].filesystem_use_std_fs = True

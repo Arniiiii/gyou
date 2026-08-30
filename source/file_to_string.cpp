@@ -12,8 +12,10 @@
 #include <corral/asio.h>
 #include <corral/corral.h>
 #include <corral/detail/asio.h>
+#include <quill/std/FilesystemPath.h>
 
 #include "gyou/utils/omega_exception.hpp"
+#include "overwrite_log_macros.hpp"
 
 namespace gyou
 {
@@ -23,8 +25,11 @@ namespace gyou
     file_to_string(boost::asio::io_context& ioc,
                    std::filesystem::path const& file_path)
     {
+        LOG_TRACE_L2("Trying to read a file '{}' into a string on heap...",
+                     file_path);
         if (not std::filesystem::exists(file_path))
             {
+                LOG_TRACE_L2("But the file does not exist?");
                 throw OmegaException<std::filesystem::path>(
                     "It was requested to read a file into a string on heap "
                     "asynchronously, but the file just simply does not exist.",

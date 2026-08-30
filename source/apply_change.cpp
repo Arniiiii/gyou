@@ -27,6 +27,7 @@ namespace gyou
     {
         LOG_INFO("Trying to apply a change for next ebuild: {}",
                  diff_info.path_to_ebuild);
+
         co_return co_await (match(
             diff_info.data_for_how_to_change,
             overloads{

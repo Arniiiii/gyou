@@ -38,8 +38,8 @@ namespace gyou
         LOG_TRACE_L1("Current data: '{}' '{}' '{}' '{}' '{}' '{}'",
                      ebuild_data.first_uri,
                      magic_enum::enum_name(ebuild_data.service),
-                     ebuild_data.filepath, ebuild_data.p, ebuild_data.pn,
-                     ebuild_data.pv);
+                     ebuild_data.filepath, ebuild_data.pn, ebuild_data.ver,
+                     ebuild_data.rev);
 
         if (ebuild_data.commit_specific.has_value())
             {
@@ -53,7 +53,7 @@ namespace gyou
             = TRY_OR_CO_RETURN(co_await gyou::get_latest_info(
                 ioc, cfg, semaphores, common_ctx, ebuild_data));
 
-        LOG_DEBUG("Current ver: {}", ebuild_data.pv);
+        LOG_DEBUG("Current ver: {}", ebuild_data.ver);
 
         if (ebuild_data.commit_specific.has_value())
             {
@@ -65,11 +65,11 @@ namespace gyou
         fetched_ver.visit(overloads{
             [&](gyou::CommitSpecific const& fetched) mutable
                 {
-                    LOG_INFO("Fetched: '{}' '{}' '{}'", ebuild_data.p,
+                    LOG_INFO("Fetched: '{}' '{}' '{}'", ebuild_data.pn,
                              fetched.date, fetched.commit);
                 },
             [&](std::string const& fetched)
-                { LOG_INFO("Fetched: '{}' '{}'", ebuild_data.p, fetched); }});
+                { LOG_INFO("Fetched: '{}' '{}'", ebuild_data.pn, fetched); }});
 
         bool is_changed = false;
         fetched_ver.visit(overloads{
@@ -82,7 +82,7 @@ namespace gyou
                 },
             [&](std::string const& fetched) mutable
                 {
-                    if (ebuild_data.pv < fetched)
+                    if (ebuild_data.ver < fetched)
                         {
                             is_changed = true;
                         }
@@ -116,7 +116,7 @@ namespace gyou
                     [&](std::string const& fetched) mutable
                         {
                             diff = {.data_for_how_to_change
-                                    = EditVerOrTag{.old_ver = ebuild_data.pv,
+                                    = EditVerOrTag{.old_ver = ebuild_data.ver,
                                                    .new_ver = fetched}};
                         }});
                 diff.path_to_ebuild = ebuild_data.filepath;

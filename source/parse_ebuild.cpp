@@ -17,10 +17,12 @@
 
 #include "gyou/bash_ebuild.hpp"
 #include "gyou/file_to_string.hpp"
+#include "gyou/parse_portage_ver.hpp"
 #include "gyou/structs/change_related/pkg_type.hpp"
 #include "gyou/structs/common_ctx.hpp"
 #include "gyou/structs/config.hpp"
 #include "gyou/structs/ebuild_parsed_data.hpp"
+#include "gyou/structs/portage_ver.hpp"
 #include "gyou/structs/service_regex.hpp"
 #include "overwrite_log_macros.hpp"
 
@@ -64,37 +66,34 @@ namespace gyou
                     pkg_p);
             }
 
-        common_ctx.re_version_matcher.input(pkg_p);
-        if (not common_ctx.re_version_matcher.find())
-            {
-                co_return std::unexpected(fmt::format(
-                    "Failed to parse version of package : {}", pkg_p));
-            }
-
-        size_t match_id = 0;
-        while (common_ctx.re_version_matcher[match_id].first != nullptr)
-            {
-                LOG_TRACE_L2(
-                    "sth: {}",
-                    std::string_view{
-                        common_ctx.re_version_matcher[match_id].first,
-                        common_ctx.re_version_matcher[match_id].second});
-                if (common_ctx.re_version_matcher[match_id].first == nullptr)
-                    {
-                        LOG_DEBUG("It is nullptr.");
-                    }
-                ++match_id;
-            }
-
-        auto pkg_n = std::string{common_ctx.re_version_matcher[1].first,
-                                 common_ctx.re_version_matcher[1].second};
-        auto pkg_v = std::string{common_ctx.re_version_matcher[2].first,
-                                 common_ctx.re_version_matcher[2].second};
-        LOG_DEBUG("PN: '{}' PV: '{}'", pkg_n, pkg_v);
         LOG_DEBUG("Doing bash for {}", path_to_ebuild.path());
+
+        gyou::ParsedEbuildStem const ebuild_parts = __extension__({
+            std::optional<gyou::ParsedEbuildStem> _ebuild_parts_parsed
+                = gyou::parse_ebuild_name(
+                    common_ctx.re_version_matcher,
+                    path_to_ebuild.path().filename().stem().string());
+
+            if (not _ebuild_parts_parsed)
+                {
+                    co_return std::unexpected(
+                        "Failed to parse the ebuild's name.");
+                }
+
+            std::move(_ebuild_parts_parsed.value());
+        });
+
+        if (not ebuild_parts.pn_inval.empty())
+            {
+                co_return std::unexpected(
+                    fmt::format("Ebuild's name is invalid, it contains next "
+                                "invalid part: {}",
+                                ebuild_parts.pn_inval));
+            }
+
         auto temp_folder_path_res
             = co_await gyou::bash_ebuild_generate_environment_file(
-                ioc, cfg, path_to_ebuild.path(), pkg_v);
+                ioc, cfg, path_to_ebuild.path(), ebuild_parts);
 
         if (!temp_folder_path_res)
             {
@@ -168,9 +167,9 @@ namespace gyou
 
         co_return gyou::EbuildSpecificData{
             .filepath = path_to_ebuild,
-            .p = pkg_p,
-            .pv = pkg_v,
-            .pn = pkg_n,
+            .pn = ebuild_parts.pn,
+            .ver = ebuild_parts.ver,
+            .rev = ebuild_parts.rev,
             .category = category_str,
             .first_uri = std::string(src_uri_str),
             .commit_specific = std::invoke(

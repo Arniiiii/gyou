@@ -34,8 +34,6 @@ namespace gyou
         LOG_TRACE_L1("Presumably running next command: '{}'",
                      (git_exe_path).string() + " fetch --all");
 
-        auto const path_to_ebuild_py_exe = cfg.path_to_portage_bin / "ebuild";
-
         auto proc = boost::process::process(
             ioc, git_exe_path, {"fetch", "--all"},
             boost::process::process_stdio{.in = {/* in to default */},
@@ -43,7 +41,7 @@ namespace gyou
                                           .err = rp_stderr},
             boost::process::process_environment{env_for_ebuild});
 
-        LOG_DEBUG("Doing sth in python, probably");
+        LOG_DEBUG("Doing `git fetch --all`, probably");
 
         std::string stdout_s;
         std::string stderr_s;
@@ -56,16 +54,16 @@ namespace gyou
             boost::asio::async_read(rp_stderr,
                                     boost::asio::dynamic_buffer(stderr_s),
                                     corral::asio_nothrow_awaitable));
-        auto&& [_, errc_proc] = proc_tuple;
+        auto&& [_, status_code_proc] = proc_tuple;
 
         LOG_TRACE_L2("stdout `git fetch --all`:\n{}\n\nstderr:\n{}", stdout_s,
                      stderr_s);
 
-        if (errc_proc != 0)
+        if (status_code_proc != 0)
             {
                 co_return std::unexpected(fmt::format(
                     "Failed to do ebuild: ec: {}\nstderr: {}\nstdout: {}",
-                    errc_proc, stderr_s, stdout_s));
+                    status_code_proc, stderr_s, stdout_s));
             }
 
         co_return {};

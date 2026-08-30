@@ -24,8 +24,6 @@ namespace gyou
     {
         std::string pkg_full_name
             = path_to_ebuild_file.filename().stem().string();
-        std::string pkg_name
-            = path_to_ebuild_file.parent_path().filename().string();
         std::string category = path_to_ebuild_file.parent_path()
                                    .parent_path()
                                    .filename()
@@ -53,9 +51,6 @@ namespace gyou
                     errc_mkdir_p.message()));
             };
 
-        boost::process::v2::filesystem::path bzip2_path_boosty
-            = boost::process::environment::find_executable("bzip2");
-
         auto cur_env = boost::process::environment::current();
 
         std::vector<boost::process::environment::key_value_pair> env_for_ebuild{
@@ -78,8 +73,6 @@ namespace gyou
                                   .parent_path()
                                   .parent_path()
                                   .string()));
-        env_for_ebuild.emplace_back(fmt::format(
-            "{}={}", "PORTAGE_BZIP2_COMMAND", bzip2_path_boosty.string()));
         ;
 
         LOG_TRACE_L1("env: {}", env_for_ebuild);
@@ -116,16 +109,16 @@ namespace gyou
             boost::asio::async_read(rp_stderr,
                                     boost::asio::dynamic_buffer(stderr_s),
                                     corral::asio_nothrow_awaitable));
-        auto&& [_, errc_proc] = proc_tuple;
+        auto&& [_, status_code_proc] = proc_tuple;
 
         LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
                      stdout_s, stderr_s);
 
-        if (errc_proc != 0)
+        if (status_code_proc != 0)
             {
                 co_return std::unexpected(fmt::format(
                     "Failed to do ebuild: ec: {}\nstderr: {}\nstdout: {}",
-                    errc_proc, stderr_s, stdout_s));
+                    status_code_proc, stderr_s, stdout_s));
             }
 
         co_return {};
