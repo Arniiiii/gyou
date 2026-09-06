@@ -32,16 +32,16 @@ namespace gyou
         boost::asio::readable_pipe rp_stderr{ioc};
 
         LOG_TRACE_L1("Presumably running next command: '{}'",
-                     (git_exe_path).string() + " fetch --all");
+                     (git_exe_path).string() + " fetch --all --prune");
 
         auto proc = boost::process::process(
-            ioc, git_exe_path, {"fetch", "--all"},
+            ioc, git_exe_path, {"fetch", "--all", "--prune"},
             boost::process::process_stdio{.in = {/* in to default */},
                                           .out = rp_stdout,
                                           .err = rp_stderr},
             boost::process::process_environment{env_for_ebuild});
 
-        LOG_DEBUG("Doing `git fetch --all`, probably");
+        LOG_DEBUG("Doing `git fetch --all --prune`, probably");
 
         std::string stdout_s;
         std::string stderr_s;

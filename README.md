@@ -6,7 +6,7 @@ An attempt to make automatic CI for a Gentoo ebuild repo. Not ready.
 
 ### Prerequisites
 
-C++ compiler like GCC or Clang.
+Clang++. Regarding GCC see [stories/gcc.md](./stories/gcc.md)
 
 Conan package manager or other package manager with libraries that the project needs. You can check the `conanfile.py` to see the list of dependencies.
 
@@ -73,7 +73,10 @@ Finally run the project:
             - [x] manifest update for changes that are version-like
         - [ ] pr logic
             - [ ] check if branch with same name exists on remote
+                - [x] `git fetch --all --prune`
+                - [ ] check.
                 - [ ] if yes, check if only one commit is different to master
+                    - [ ] get diff of last commit
                     - [ ] if yes
                         - [ ] check whether the diff is same
                             - only file diff, not commit messages
@@ -102,6 +105,10 @@ Finally run the project:
             - no modules until 2030.
             - [x] seems useless since most stuff are either functions with `auto` or explicit templates.
                 - made it less template-ish
+    - should regexes be global if they are compiled once?
+        - should be
+        - but then I lose explicit lifetime control in case I suddenly start using corral::ThreadPool
+    - [ ] more tests ?
     - [ ] CI
         - [ ] how should it look like? This project does not even have auto tests.
     

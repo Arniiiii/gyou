@@ -64,7 +64,6 @@
 #include <reflex/pcre2matcher.h>
 
 #include "gyou/apply_change.hpp"
-#include "gyou/bash_ebuild_manifest.hpp"
 #include "gyou/common_ctx_create.hpp"
 #include "gyou/file_to_string.hpp"
 #include "gyou/get_what_to_change.hpp"
@@ -111,9 +110,44 @@ namespace
         gyou::semaphores_array_type& semaphores,
         gyou::CommonContext& common_ctx)
     {
-        gyou::PackagesToUpdate const changes
-            = co_await gyou::get_what_to_change(ioc, cfg, semaphores,
-                                                common_ctx);
+        boost::process::v2::filesystem::path git_exe_path
+            = boost::process::environment::find_executable("git");
+
+        std::optional<gyou::ReturnCode> return_code;
+
+        gyou::PackagesToUpdate const changes = __extension__({
+            gyou::PackagesToUpdate _changes;
+            CORRAL_WITH_NURSERY(nursery)
+            {
+                nursery.start(
+                    [&]() -> corral::Task<void>
+                        {
+                            _changes = co_await gyou::get_what_to_change(
+                                ioc, cfg, semaphores, common_ctx);
+                        });
+
+                nursery.start(
+                    [&]() -> corral::Task<void>
+                        {
+                            auto res = co_await gyou::git_fetch(ioc, cfg,
+                                                                git_exe_path);
+                            if (not res)
+                                {
+                                    LOG_ERROR(
+                                        "`git fetch --all --prune` has failed. "
+                                        "It's "
+                                        "output:\n{}",
+                                        std::move(res.error()));
+                                    return_code
+                                        = gyou::ReturnCode::FailedGitFetch;
+                                    nursery.cancel();
+                                    co_return;
+                                }
+                        });
+                co_return corral::join;
+            };
+            std::move(_changes);
+        });
 
         for (auto const& diff : changes.what_to_change)
             {
@@ -238,10 +272,8 @@ namespace
             path_to_git_;
         });
 
-        boost::process::v2::filesystem::path git_exe_path
-            = boost::process::environment::find_executable("git");
-
-        std::optional<gyou::ReturnCode> return_code;
+        // this is actually pretty simple and stupid code, that looks ugly and I
+        // do not know how to make it better.
         CORRAL_WITH_NURSERY(nursery)
         {
             // logic for 0, i.e. no grouping
@@ -398,23 +430,6 @@ namespace
                                     }
                             });
                 }
-
-            nursery.start(
-                [&]() -> corral::Task<void>
-                    {
-                        auto res
-                            = co_await gyou::git_fetch(ioc, cfg, git_exe_path);
-                        if (not res)
-                            {
-                                LOG_ERROR(
-                                    "`git fetch --all` has failed. It's "
-                                    "output:\n{}",
-                                    std::move(res.error()));
-                                return_code = gyou::ReturnCode::FailedGitFetch;
-                                nursery.cancel();
-                                co_return;
-                            }
-                    });
 
             co_return corral::join;
         };
