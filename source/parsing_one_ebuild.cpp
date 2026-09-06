@@ -18,7 +18,7 @@
 #include "gyou/structs/result_of_parsing.hpp"
 #include "gyou/utils/rusty_macros.hpp"
 #include "gyou/utils/variants_utils.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {

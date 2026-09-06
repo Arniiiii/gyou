@@ -24,7 +24,7 @@
 #include "gyou/structs/ebuild_parsed_data.hpp"
 #include "gyou/structs/portage_ver.hpp"
 #include "gyou/structs/service_regex.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {

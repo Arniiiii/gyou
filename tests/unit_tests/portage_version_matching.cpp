@@ -9,7 +9,7 @@
 #include "gyou/create_pcre2_regex.hpp"
 #include "gyou/parse_portage_ver.hpp"
 #include "gyou/structs/portage_ver.hpp"
-#include "quill_static.hpp"
+#include "quill_usage/quill_setup.hpp"
 
 TEST(Parsing, ParsingPortageVersions)
 {

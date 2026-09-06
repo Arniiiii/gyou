@@ -1,16 +1,17 @@
-#include "quill_static.hpp"
-
+#include <quill/Backend.h>
+#include <quill/Frontend.h>
+#include <quill/Logger.h>
 #include <quill/core/LogLevel.h>
+#include <quill/sinks/ConsoleSink.h>
+#include <quill/sinks/FileSink.h>
 
-#include "quill/Backend.h"
-#include "quill/Frontend.h"
-#include "quill/Logger.h"
-#include "quill/sinks/ConsoleSink.h"
-#include "quill/sinks/FileSink.h"
+#include "quill_usage/quill_setup.hpp"
 
 // Define a global variable for a logger to avoid looking up the logger each
 // time. Additional global variables can be defined for additional loggers if
 // needed.
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,misc-use-internal-linkage)
 quill::Logger* global_logger_a;
 
 void setup_quill(std::filesystem::path const& log_file,

@@ -8,7 +8,7 @@
 #include "gyou/consts/pcre2_regex_tag_ver.hpp"
 #include "gyou/create_pcre2_regex.hpp"
 #include "gyou/tag_to_portage_versions.hpp"
-#include "quill_static.hpp"
+#include "quill_usage/quill_setup.hpp"
 
 TEST(Parsing, ParsingSomeTags)
 {

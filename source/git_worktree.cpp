@@ -15,8 +15,9 @@
 #include <fmt/std.h>
 #include <quill/std/FilesystemPath.h>
 
+#include "gyou/async_read_with_custom_log.hpp"
 #include "gyou/structs/config.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {
@@ -46,17 +47,10 @@ namespace gyou
 
         LOG_DEBUG("Waiting until git does it job, probably");
 
-        std::string stdout_s;
-        std::string stderr_s;
-
-        auto [proc_tuple, _, _] = co_await corral::allOf(
+        auto [proc_tuple, stdout_s, stderr_s] = co_await corral::allOf(
             proc.async_wait(corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stdout,
-                                    boost::asio::dynamic_buffer(stdout_s),
-                                    corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stderr,
-                                    boost::asio::dynamic_buffer(stderr_s),
-                                    corral::asio_nothrow_awaitable));
+            gyou::read_loop("git_worktree_out", rp_stdout),
+            gyou::read_loop("git_worktree_err", rp_stderr));
         auto&& [_, errc_proc] = proc_tuple;
 
         LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,

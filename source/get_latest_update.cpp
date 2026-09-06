@@ -19,7 +19,7 @@
 #include "gyou/structs/config.hpp"
 #include "gyou/structs/ebuild_parsed_data.hpp"
 #include "gyou/utils/variants_utils.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {

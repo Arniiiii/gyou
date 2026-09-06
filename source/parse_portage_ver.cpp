@@ -7,7 +7,7 @@
 
 #include "gyou/consts/pcre2_regex_portage_ver.hpp"
 #include "gyou/structs/portage_ver.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {

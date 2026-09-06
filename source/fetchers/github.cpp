@@ -29,7 +29,7 @@
 #include "gyou/structs/ebuild_parsed_data.hpp"
 #include "gyou/tag_to_portage_versions.hpp"
 #include "gyou/utils/rusty_macros.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {

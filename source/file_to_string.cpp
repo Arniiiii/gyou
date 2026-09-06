@@ -15,7 +15,7 @@
 #include <quill/std/FilesystemPath.h>
 
 #include "gyou/utils/omega_exception.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {
@@ -48,6 +48,10 @@ namespace gyou
             {
                 co_return std::unexpected(errc);
             }
+
+        LOG_TRACE_L2("Successfully read a file '{}' into a string on heap.",
+                     file_path);
         co_return str_of_file;
     }
 }  // namespace gyou
+#include "quill_usage/overwrite_log_macros.hpp"

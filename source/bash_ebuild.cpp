@@ -14,9 +14,10 @@
 #include <corral/corral.h>
 #include <fmt/format.h>
 
+#include "gyou/async_read_with_custom_log.hpp"
 #include "gyou/structs/config.hpp"
 #include "gyou/structs/portage_ver.hpp"
-#include "overwrite_log_macros.hpp"
+#include "quill_usage/overwrite_log_macros.hpp"
 
 namespace gyou
 {
@@ -104,17 +105,12 @@ namespace gyou
 
         LOG_DEBUG("Doing sth in bash, probably");
 
-        std::string stdout_s;
-        std::string stderr_s;
-
-        auto [proc_tuple, _, _] = co_await corral::allOf(
+        auto [proc_tuple, stdout_s, stderr_s] = co_await corral::allOf(
             proc.async_wait(corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stdout,
-                                    boost::asio::dynamic_buffer(stdout_s),
-                                    corral::asio_nothrow_awaitable),
-            boost::asio::async_read(rp_stderr,
-                                    boost::asio::dynamic_buffer(stderr_s),
-                                    corral::asio_nothrow_awaitable));
+            gyou::read_loop(fmt::format("env_{}_out", pkg_full_name),
+                            rp_stdout),
+            gyou::read_loop(fmt::format("env_{}_err", pkg_full_name),
+                            rp_stderr));
         auto&& [_, status_code_proc] = proc_tuple;
 
         LOG_TRACE_L2("`{}`\nstdout:\n{}\n\nstderr:\n{}", exe_representation,
