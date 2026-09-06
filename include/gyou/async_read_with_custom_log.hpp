@@ -1,0 +1,9 @@
+#ifndef INCLUDE_GYOU_ASYNC_READ_WITH_CUSTOM_LOG_HPP_
+#define INCLUDE_GYOU_ASYNC_READ_WITH_CUSTOM_LOG_HPP_
+
+namespace gyou {
+
+[[nodiscard]] 
+
+}
+#endif  // INCLUDE_GYOU_ASYNC_READ_WITH_CUSTOM_LOG_HPP_

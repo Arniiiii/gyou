@@ -28,7 +28,7 @@ void setup_quill(std::filesystem::path const& log_file,
                 = quill::Frontend::create_or_get_sink<quill::ConsoleSink>(
                     "console_log_id_1");
             global_logger_a = quill::Frontend::create_or_get_logger(
-                "root", std::move(console_sink));
+                "gyou", std::move(console_sink));
         }
     else
         {

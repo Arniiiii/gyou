@@ -2,6 +2,7 @@
 #include <array>
 #include <expected>
 #include <filesystem>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -90,20 +91,6 @@
 
 namespace
 {
-
-    // [[nodiscard]] corral::Task<std::expected<int, std::string_view>>
-    // gh_create_pr(boost::asio::io_context& ioc, gyou::Config const& cfg,
-    //              std::filesystem::path const& path_to_gh,
-    //              std::filesystem::path const& folder_path,
-    //              std::string const& branch_name)
-    // {
-    //     // check if authorized in any account via `gh auth status` and regex
-    //     // `Logged in to github.com account`
-    //
-    //     // somehow check whether we need a pr
-    //
-    //     // create pr
-    // }
 
     [[nodiscard]] corral::Task<gyou::ReturnCode> chief_logic(
         boost::asio::io_context& ioc, gyou::Config const& cfg,
@@ -224,7 +211,7 @@ namespace
                                       .string();
                           auto const it_str_to_group_index
                               = groups.groups.find(pv_to_look);
-                          if (it_str_to_group_index != groups.groups.end())
+                          if (it_str_to_group_index != groups.groups.cend())
                               {
                                   LOG_TRACE_L1(
                                       "Found match to a group: pkg_name: '{}' "
@@ -272,101 +259,32 @@ namespace
             path_to_git_;
         });
 
+        std::vector<std::string> branches;
+
         // this is actually pretty simple and stupid code, that looks ugly and I
         // do not know how to make it better.
         CORRAL_WITH_NURSERY(nursery)
         {
-            // logic for 0, i.e. no grouping
-            auto range_grp_to_change_idx_no_grouping
-                = group_to_change.equal_range(0);
-            for (auto it_grp_to_chg_idx
-                 = range_grp_to_change_idx_no_grouping.first;
-                 it_grp_to_chg_idx
-                 != range_grp_to_change_idx_no_grouping.second;
-                 ++it_grp_to_chg_idx)
+            auto worktree_create_change_and_pr
+                = [&](corral::Nursery& nursery, std::string prefix,
+                      auto range_grp_to_change_idx)
                 {
-                    std::filesystem::path const path_to_ebuild
-                        = changes.what_to_change.at(it_grp_to_chg_idx->second)
-                              .path_to_ebuild;
-                    std::string const base_name
-                        = path_to_ebuild.parent_path()
-                              .parent_path()
-                              .filename()
-                              .string()
-                          + path_to_ebuild.parent_path().filename().string();
-                    std::filesystem::path const folder_path
-                        = temp_folder_worktrees / ("0_" + base_name);
-                    std::string const branch_name = "ci_update/" + base_name;
-
-                    nursery.start(
-                        [&, folder_path = folder_path,
-                         branch_name = branch_name,
-                         chg_idx
-                         = it_grp_to_chg_idx->second]() -> corral::Task<void>
-                            {
-                                {
-                                    auto res
-                                        = co_await gyou::git_create_worktree(
-                                            ioc, cfg, path_to_git, folder_path,
-                                            branch_name);
-                                    if (not res)
-                                        {
-                                            LOG_ERROR(
-                                                "Failed to create a git "
-                                                "worktree: "
-                                                "{}",
-                                                std::move(res.error()));
-                                            return_code = gyou::ReturnCode::
-                                                FailedMakingGitToMakeWorktrees;
-                                            nursery.cancel();
-                                            co_return;
-                                        }
-                                }
-                                // make changes
-
-                                {
-                                    auto res = co_await gyou::apply_change(
-                                        ioc, cfg, folder_path,
-                                        changes.what_to_change.at(chg_idx));
-                                    if (not res)
-                                        {
-                                            LOG_ERROR(
-                                                "Failed to apply changes: "
-                                                "{}",
-                                                std::move(res.error()));
-                                            return_code = gyou::ReturnCode::
-                                                FailedApplyChange;
-                                            nursery.cancel();
-                                            co_return;
-                                        }
-                                }
-
-                                // gh
-                            });
-                }
-
-            // logic for groups
-
-            for (size_t group_num = 1; group_num < groups.amount_of_groups + 1;
-                 ++group_num)
-                {
-                    auto range_grp_to_change_idx
-                        = group_to_change.equal_range(group_num);
-
                     std::filesystem::path const path_to_ebuild
                         = changes.what_to_change
                               .at(range_grp_to_change_idx.first->second)
                               .path_to_ebuild;
-                    std::string const base_name
-                        = path_to_ebuild.parent_path()
-                              .parent_path()
-                              .filename()
-                              .string()
-                          + path_to_ebuild.parent_path().filename().string();
+                    std::string const cat_pn = fmt::format(
+                        "{}/{}",
+                        path_to_ebuild.parent_path()
+                            .parent_path()
+                            .filename()
+                            .string(),
+                        path_to_ebuild.parent_path().filename().string());
                     std::filesystem::path const folder_path
-                        = temp_folder_worktrees
-                          / (fmt::format("{}_", group_num) + base_name);
-                    std::string const branch_name = "ci_update/" + base_name;
+                        = temp_folder_worktrees / (prefix + cat_pn);
+                    std::string const branch_name
+                        = fmt::format("ci_update/{}_{}", prefix, cat_pn);
+                    branches.emplace_back(branch_name);
 
                     nursery.start(
                         [&, folder_path = folder_path,
@@ -429,6 +347,34 @@ namespace
                                                 });
                                     }
                             });
+                };
+
+            // logic for 0, i.e. no grouping
+            auto range_grp_to_change_idx_no_grouping
+                = group_to_change.equal_range(0);
+            for (auto it_grp_to_chg_idx
+                 = range_grp_to_change_idx_no_grouping.first;
+                 it_grp_to_chg_idx
+                 != range_grp_to_change_idx_no_grouping.second;
+                 ++it_grp_to_chg_idx)
+                {
+                    worktree_create_change_and_pr(
+                        nursery, "0",
+                        std::make_pair(it_grp_to_chg_idx,
+                                       std::next(it_grp_to_chg_idx)));
+                }
+
+            // logic for groups
+
+            for (size_t group_num = 1; group_num < groups.amount_of_groups + 1;
+                 ++group_num)
+                {
+                    auto range_grp_to_change_idx
+                        = group_to_change.equal_range(group_num);
+
+                    worktree_create_change_and_pr(nursery,
+                                                  fmt::format("{}", group_num),
+                                                  range_grp_to_change_idx);
                 }
 
             co_return corral::join;
