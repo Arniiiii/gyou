@@ -359,7 +359,7 @@ namespace
                  ++it_grp_to_chg_idx)
                 {
                     worktree_create_change_and_pr(
-                        nursery, "0",
+                        nursery, "0_",
                         std::make_pair(it_grp_to_chg_idx,
                                        std::next(it_grp_to_chg_idx)));
                 }
@@ -373,7 +373,7 @@ namespace
                         = group_to_change.equal_range(group_num);
 
                     worktree_create_change_and_pr(nursery,
-                                                  fmt::format("{}", group_num),
+                                                  fmt::format("{}_", group_num),
                                                   range_grp_to_change_idx);
                 }
 

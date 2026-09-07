@@ -40,9 +40,15 @@ namespace gyou
                             std::string_view(buf.data(), received_size));
                         res.append(buf.data(), received_size);
                     }
-                if (error_code)
+                if (error_code == boost::asio::error::eof)
                     {
                         co_return res;
+                    }
+                if (error_code)
+                    {
+                        QUILL_LOG_WARNING(
+                            logger_with_custom_name,
+                            "A pipe has been broken not via eof.");
                     }
             }
     };

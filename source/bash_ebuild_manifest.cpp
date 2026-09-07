@@ -81,13 +81,13 @@ namespace gyou
         boost::asio::readable_pipe rp_stdout{ioc};
         boost::asio::readable_pipe rp_stderr{ioc};
 
+        auto const path_to_ebuild_py_exe = cfg.path_to_portage_bin / "ebuild";
+
         std::string const exe_representation
-            = (cfg.path_to_portage_bin / "ebuild").string() + " "
+            = (path_to_ebuild_py_exe).string() + " "
               + path_to_ebuild_file.string() + " manifest";
         LOG_TRACE_L1("Presumably running next command: '{}'",
                      exe_representation);
-
-        auto const path_to_ebuild_py_exe = cfg.path_to_portage_bin / "ebuild";
 
         auto proc = boost::process::process(
             ioc, path_to_ebuild_py_exe.string(),
