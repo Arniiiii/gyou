@@ -44,11 +44,12 @@ namespace gyou
 
         LOG_DEBUG("Doing `git fetch --all --prune`, probably");
 
-        auto [proc_tuple, stdout_s, stderr_s] = co_await corral::allOf(
-            proc.async_wait(corral::asio_nothrow_awaitable),
+        auto [stdout_s, stderr_s] = co_await corral::allOf(
             gyou::read_loop("git_fetch_out", rp_stdout),
             gyou::read_loop("git_fetch_err", rp_stderr));
-        auto&& [_, status_code_proc] = proc_tuple;
+        auto&& [_, status_code_proc]
+            = co_await proc.async_wait(corral::asio_nothrow_awaitable);
+        ;
 
         LOG_TRACE_L2("stdout `git fetch --all`:\n{}\n\nstderr:\n{}", stdout_s,
                      stderr_s);

@@ -47,11 +47,12 @@ namespace gyou
 
         LOG_DEBUG("Waiting until git does it job, probably");
 
-        auto [proc_tuple, stdout_s, stderr_s] = co_await corral::allOf(
-            proc.async_wait(corral::asio_nothrow_awaitable),
+        auto [stdout_s, stderr_s] = co_await corral::allOf(
+
             gyou::read_loop("git_worktree_out", rp_stdout),
             gyou::read_loop("git_worktree_err", rp_stderr));
-        auto&& [_, errc_proc] = proc_tuple;
+        auto&& [_, errc_proc]
+            = co_await proc.async_wait(corral::asio_nothrow_awaitable);
 
         LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
                      stdout_s, stderr_s);
