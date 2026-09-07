@@ -59,7 +59,7 @@ target_link_libraries(${PROJECT_NAME}_lib PUBLIC Boost::boost)
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC Boost::process)
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC Boost::url)
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC Boost::stacktrace_from_exception)
-# just add -lbacktrace
+# just add -lbacktrace. conan's `libbacktrace` is defective : it only gives headers AFAIK.
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC backtrace)
 find_package(corral REQUIRED)
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC corral::corral)
