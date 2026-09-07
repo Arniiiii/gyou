@@ -99,13 +99,14 @@ namespace gyou
 
         LOG_DEBUG("Doing sth in python, probably");
 
-        auto [proc_tuple, stdout_s, stderr_s] = co_await corral::allOf(
-            proc.async_wait(corral::asio_nothrow_awaitable),
+        auto [stdout_s, stderr_s] = co_await corral::allOf(
             gyou::read_loop(fmt::format("manifest_{}_out", pkg_full_name),
                             rp_stdout),
             gyou::read_loop(fmt::format("manifest_{}_err", pkg_full_name),
                             rp_stderr));
-        auto&& [_, status_code_proc] = proc_tuple;
+
+        auto&& [_, status_code_proc]
+            = co_await proc.async_wait(corral::asio_nothrow_awaitable);
 
         LOG_TRACE_L2("`{}`\nstdout ``:\n{}\n\nstderr:\n{}", exe_representation,
                      stdout_s, stderr_s);
